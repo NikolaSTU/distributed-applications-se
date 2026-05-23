@@ -1,0 +1,1980 @@
+openapi: 3.0.4
+
+info:
+  title: Diabetes Management API
+  version: v1
+  description: >
+    REST API for diabetes management (Type 1 and Type 2). The system allows users to track
+    their meals, blood glucose levels, and insulin doses, as well as receive automatically
+    calculated recommended insulin doses based on the Insulin-to-Carb Ratio (ICR) and
+    Insulin Sensitivity Factor (ISF).
+
+tags:
+  - name: Auth
+    description: User authentication and registration
+  - name: Users
+    description: Management of user profiles with diabetes parameters (ICR, ISF, target blood glucose)
+  - name: Foods
+    description: Management of the food database with macronutrients and glycemic index
+  - name: FoodEntries
+    description: Records of specific food items added to a meal, with calculated macronutrients
+  - name: MealEntries
+    description: Meal records with automatic calculation of the recommended insulin dose
+  - name: GlucoseEntries
+    description: Blood glucose level records (manual measurements or from a CGM sensor)
+  - name: InsulinEntries
+    description: Records of injected insulin (bolus or basal)
+
+paths:
+
+  /api/Auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new user
+      description: >
+        Creates a new user account. The username must be unique.
+        The password is hashed before storage. On successful registration a JWT token
+        is returned, allowing the user to immediately start using the API.
+      operationId: Auth_Register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserRegisterDTO'
+            example:
+              username: john_doe
+              password: S3cur3P@ssw0rd!
+      responses:
+        '201':
+          description: User successfully registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponseDTO'
+              example:
+                token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                userId: 42
+                username: john_doe
+        '400':
+          description: Invalid input data (e.g. password too short or missing username).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorResponse'
+        '409':
+          description: Username already exists.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                message: A user with that username already exists.
+
+  /api/Auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in to the system
+      description: >
+        Authenticates an existing user and returns a JWT Bearer token.
+        The token must be sent in the `Authorization: Bearer <token>` header
+        with all protected requests.
+      operationId: Auth_Login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserLoginDTO'
+            example:
+              username: john_doe
+              password: S3cur3P@ssw0rd!
+      responses:
+        '200':
+          description: Successful login. Returns a JWT token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponseDTO'
+              example:
+                token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                userId: 42
+                username: john_doe
+        '400':
+          description: Required fields are missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorResponse'
+        '401':
+          description: Invalid username or password.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                message: Invalid username or password.
+
+  /api/Users:
+    get:
+      tags: [Users]
+      summary: List users (paginated, with filters)
+      description: >
+        Returns a paginated list of users. Accessible to administrators only.
+        Supports filtering by username and email.
+      operationId: Users_GetAll
+      security:
+        - Bearer: []
+      parameters:
+        - $ref: '#/components/parameters/PageNumber'
+        - $ref: '#/components/parameters/PageSize'
+        - name: Filters.Name
+          in: query
+          description: Filter by username (partial match, case-insensitive).
+          schema:
+            type: string
+            example: john
+        - name: Filters.Email
+          in: query
+          description: Filter by email address (partial match).
+          schema:
+            type: string
+            format: email
+            example: john@example.com
+      responses:
+        '200':
+          description: Successfully returned list of users.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponseDTOPagedResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    post:
+      tags: [Users]
+      summary: Create or update a user profile
+      description: >
+        Creates or updates a user's diabetes profile with the ICR (Insulin-to-Carb Ratio),
+        ISF (Insulin Sensitivity Factor), and target blood glucose parameters.
+        These values are used when calculating the recommended insulin dose.
+      operationId: Users_Create
+      security:
+        - Bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdateDTO'
+            example:
+              username: john_doe
+              userId: 42
+              icr: 10.0
+              isf: 2.5
+              targetGlucose: 5.5
+      responses:
+        '201':
+          description: Profile successfully created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponseDTO'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/Users/{id}:
+    get:
+      tags: [Users]
+      summary: Get a specific user
+      description: Returns the full profile of the user, including diabetes parameters (ICR, ISF, targetGlucose).
+      operationId: Users_GetById
+      security:
+        - Bearer: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Successfully returned user profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponseDTO'
+              example:
+                id: 42
+                userId: null
+                username: john_doe
+                icr: 10.0
+                isf: 2.5
+                targetGlucose: 5.5
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      tags: [Users]
+      summary: Update a user profile
+      description: >
+        Updates the user's diabetes parameters. Changing ICR or ISF will affect
+        future insulin dose calculations.
+      operationId: Users_Update
+      security:
+        - Bearer: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdateDTO'
+      responses:
+        '204':
+          description: Profile successfully updated. No response body.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags: [Users]
+      summary: Delete a user profile
+      description: Deletes the user account and all associated records (meals, glucose, insulin).
+      operationId: Users_Delete
+      security:
+        - Bearer: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '204':
+          description: User successfully deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/Foods:
+    get:
+      tags: [Foods]
+      summary: List food items (paginated, with filters)
+      description: >
+        Returns a paginated list of food items. Supports filtering by name,
+        glycemic index, calories, and carbohydrates.
+        Includes both global items and items added by a specific user.
+      operationId: Foods_GetAll
+      security:
+        - Bearer: []
+      parameters:
+        - $ref: '#/components/parameters/PageNumber'
+        - $ref: '#/components/parameters/PageSize'
+        - name: Filters.CurrentUserId
+          in: query
+          description: Show only items belonging to the specified user.
+          schema:
+            type: integer
+            format: int32
+        - name: Filters.Name
+          in: query
+          description: Filter by name (partial match, case-insensitive).
+          schema:
+            type: string
+            example: apple
+        - name: Filters.MinGlycemicIndex
+          in: query
+          description: Minimum glycemic index (0–100).
+          schema:
+            type: number
+            format: double
+            minimum: 0
+            maximum: 100
+        - name: Filters.MaxGlycemicIndex
+          in: query
+          description: Maximum glycemic index (0–100).
+          schema:
+            type: number
+            format: double
+            minimum: 0
+            maximum: 100
+        - name: Filters.MinCalories
+          in: query
+          description: Minimum calories per 100 g.
+          schema:
+            type: number
+            format: double
+            minimum: 0
+        - name: Filters.MaxCalories
+          in: query
+          description: Maximum calories per 100 g.
+          schema:
+            type: number
+            format: double
+            minimum: 0
+        - name: Filters.MinCarbs
+          in: query
+          description: Minimum carbohydrates per 100 g.
+          schema:
+            type: number
+            format: double
+            minimum: 0
+        - name: Filters.MaxCarbs
+          in: query
+          description: Maximum carbohydrates per 100 g.
+          schema:
+            type: number
+            format: double
+            minimum: 0
+      responses:
+        '200':
+          description: Successfully returned list of food items.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FoodResponseDTOPagedResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags: [Foods]
+      summary: Add a new food item
+      description: >
+        Adds a new item to the food database. Calories are calculated automatically
+        using the formula: (carbs × 4) + (protein × 4) + (fat × 9).
+        Each user may add their own custom food items.
+      operationId: Foods_Create
+      security:
+        - Bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FoodCreateUpdateDTO'
+            example:
+              userId: 42
+              name: White Bread
+              carbPer100g: 49.0
+              proteinPer100g: 8.0
+              fatPer100g: 3.0
+              glycemicIndex: 75.0
+      responses:
+        '201':
+          description: Food item successfully created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FoodResponseDTO'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/Foods/{id}:
+    get:
+      tags: [Foods]
+      summary: Get a specific food item
+      description: Returns full details of the food item including macronutrients, glycemic index, and calories per 100 g.
+      operationId: Foods_GetById
+      security:
+        - Bearer: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Successfully returned food item.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FoodResponseDTO'
+              example:
+                id: 1
+                userId: null
+                name: White Bread
+                carbPer100g: 49.0
+                proteinPer100g: 8.0
+                fatPer100g: 3.0
+                glycemicIndex: 75.0
+                caloriesPer100g: 259.0
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      tags: [Foods]
+      summary: Update a food item
+      description: Updates the food item data. Allowed only for the owner of the item or an administrator.
+      operationId: Foods_Update
+      security:
+        - Bearer: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FoodCreateUpdateDTO'
+      responses:
+        '204':
+          description: Food item successfully updated.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags: [Foods]
+      summary: Delete a food item
+      description: Deletes the food item. Only allowed if the item is not referenced by any food entry records.
+      operationId: Foods_Delete
+      security:
+        - Bearer: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '204':
+          description: Food item successfully deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The food item cannot be deleted because it is referenced by existing food entry records.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/MealEntries:
+    get:
+      tags: [MealEntries]
+      summary: List meal records (paginated, with filters)
+      description: >
+        Returns a paginated list of the user's meal records. Each meal contains
+        the calculated totals for carbohydrates, protein, fat, and calories.
+      operationId: MealEntries_GetAll
+      security:
+        - Bearer: []
+      parameters:
+        - $ref: '#/components/parameters/PageNumber'
+        - $ref: '#/components/parameters/PageSize'
+        - name: Filters.CurrentUserId
+          in: query
+          description: Filter by user ID.
+          schema:
+            type: integer
+            format: int32
+        - name: Filters.Name
+          in: query
+          description: Filter by meal name (partial match).
+          schema:
+            type: string
+            example: Lunch
+        - name: Filters.FromDate
+          in: query
+          description: Start date filter (inclusive).
+          schema:
+            type: string
+            format: date-time
+            example: '2025-01-01T00:00:00Z'
+        - name: Filters.ToDate
+          in: query
+          description: End date filter (inclusive).
+          schema:
+            type: string
+            format: date-time
+            example: '2025-12-31T23:59:59Z'
+      responses:
+        '200':
+          description: Successfully returned list of meal records.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MealEntryResponseDTOPagedResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags: [MealEntries]
+      summary: Create a new meal record
+      description: >
+        Creates a new meal record. After food items are added to the meal via
+        `/api/FoodEntries`, the system automatically calculates the total macronutrients
+        and recommended insulin dose.
+      operationId: MealEntries_Create
+      security:
+        - Bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MealEntryCreateUpdateDTO'
+            example:
+              userId: 42
+              name: Wednesday Lunch
+      responses:
+        '201':
+          description: Meal record successfully created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MealEntryResponseDTO'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/MealEntries/{id}:
+    get:
+      tags: [MealEntries]
+      summary: Get a specific meal record
+      description: >
+        Returns full details of the meal record, including the calculated totals
+        for carbohydrates, protein, fat, and calories.
+      operationId: MealEntries_GetById
+      security:
+        - Bearer: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Successfully returned meal record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MealEntryResponseDTO'
+              example:
+                id: 7
+                userId: 42
+                name: Wednesday Lunch
+                totalCarb: 65.4
+                totalProtein: 22.1
+                totalFat: 14.8
+                totalCalories: 479.2
+                createdAt: '2025-06-15T12:30:00Z'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      tags: [MealEntries]
+      summary: Update a meal record
+      description: Updates the name of the meal record.
+      operationId: MealEntries_Update
+      security:
+        - Bearer: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MealEntryCreateUpdateDTO'
+      responses:
+        '204':
+          description: Meal record successfully updated.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags: [MealEntries]
+      summary: Delete a meal record
+      description: Deletes the meal record and all associated food entry records.
+      operationId: MealEntries_Delete
+      security:
+        - Bearer: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '204':
+          description: Meal record successfully deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/MealEntries/{id}/dose:
+    get:
+      tags: [MealEntries]
+      summary: Calculate recommended insulin dose for a meal
+      description: >
+        Calculates the recommended bolus insulin dose for a specific meal based
+        on the formula:
+
+        **Dose (units) = Total Carbohydrates (g) ÷ ICR**
+
+        where ICR (Insulin-to-Carb Ratio) is the user's carbohydrate coefficient
+        (e.g. ICR = 10 means 1 unit of insulin per 10 g of carbohydrates).
+
+        When the user's current blood glucose is available, a correction dose may also be added:
+
+        **Correction = (Current Blood Glucose − Target Blood Glucose) ÷ ISF**
+
+        **Important:** This value is a recommendation only and does not replace medical advice.
+      operationId: MealEntries_GetDose
+      security:
+        - Bearer: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Successfully calculated recommended insulin dose in units.
+          content:
+            application/json:
+              schema:
+                type: number
+                format: double
+                description: Recommended insulin dose in units (U).
+                example: 6.54
+        '400':
+          description: The user has no ICR/ISF parameters configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                message: User ICR and ISF parameters are not configured. Please update your profile.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/FoodEntries:
+    get:
+      tags: [FoodEntries]
+      summary: List food entries (paginated, with filters)
+      description: >
+        Returns a paginated list of food entries (specific items added to meals).
+        Each entry includes the calculated macronutrient values for the specific weight.
+      operationId: FoodEntries_GetAll
+      security:
+        - Bearer: []
+      parameters:
+        - $ref: '#/components/parameters/PageNumber'
+        - $ref: '#/components/parameters/PageSize'
+        - name: Filters.CurrentUserId
+          in: query
+          description: Filter by user ID.
+          schema:
+            type: integer
+            format: int32
+        - name: Filters.FoodId
+          in: query
+          description: Filter by food item ID.
+          schema:
+            type: integer
+            format: int32
+        - name: Filters.MealEntryId
+          in: query
+          description: Filter by meal ID — returns all food items in the specified meal.
+          schema:
+            type: integer
+            format: int32
+        - name: Filters.FromDate
+          in: query
+          description: Start date filter.
+          schema:
+            type: string
+            format: date-time
+        - name: Filters.ToDate
+          in: query
+          description: End date filter.
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Successfully returned list of food entries.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FoodEntryResponseDTOPagedResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags: [FoodEntries]
+      summary: Add a food item to a meal
+      description: >
+        Adds a specific food item with a given weight to a meal.
+        Macronutrient values are calculated automatically in proportion to the weight:
+        e.g. `carbs = (carbPer100g × weight) / 100`.
+        Adding an entry automatically updates the meal's total nutritional values.
+      operationId: FoodEntries_Create
+      security:
+        - Bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FoodEntryCreateUpdateDTO'
+            example:
+              userId: 42
+              foodId: 1
+              mealEntryId: 7
+              weigth: 120.0
+      responses:
+        '201':
+          description: Food entry successfully added.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FoodEntryResponseDTO'
+              example:
+                id: 15
+                userId: 42
+                foodId: 1
+                mealEntryId: 7
+                weigth: 120.0
+                carbs: 58.8
+                protein: 9.6
+                fat: 3.6
+                calories: 310.8
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: The specified food item or meal does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/FoodEntries/{id}:
+    get:
+      tags: [FoodEntries]
+      summary: Get a specific food entry
+      description: Returns full details of the food entry, including calculated macronutrients.
+      operationId: FoodEntries_GetById
+      security:
+        - Bearer: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Successfully returned food entry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FoodEntryResponseDTO'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      tags: [FoodEntries]
+      summary: Update a food entry
+      description: Updates the weight or associated food item / meal. Macronutrients are recalculated automatically.
+      operationId: FoodEntries_Update
+      security:
+        - Bearer: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FoodEntryCreateUpdateDTO'
+      responses:
+        '204':
+          description: Food entry successfully updated.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags: [FoodEntries]
+      summary: Delete a food entry
+      description: Deletes the entry and updates the total nutritional values of the associated meal.
+      operationId: FoodEntries_Delete
+      security:
+        - Bearer: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '204':
+          description: Food entry successfully deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+
+  /api/GlucoseEntries:
+    get:
+      tags: [GlucoseEntries]
+      summary: List blood glucose measurements (paginated, with filters)
+      description: >
+        Returns a paginated list of the user's blood glucose measurements.
+        Supports filtering by date range, note, source, and maximum value.
+      operationId: GlucoseEntries_GetAll
+      security:
+        - Bearer: []
+      parameters:
+        - $ref: '#/components/parameters/PageNumber'
+        - $ref: '#/components/parameters/PageSize'
+        - name: Filters.CurrentUserId
+          in: query
+          description: Filter by user ID.
+          schema:
+            type: integer
+            format: int32
+        - name: Filters.Note
+          in: query
+          description: Search within notes (partial match).
+          schema:
+            type: string
+        - name: Filters.Source
+          in: query
+          description: Filter by measurement source (e.g. 'CGM', 'Manual').
+          schema:
+            type: string
+            example: CGM
+        - name: Filters.MaxValue
+          in: query
+          description: Maximum blood glucose value (mmol/L).
+          schema:
+            type: number
+            format: double
+            minimum: 0
+        - name: Filters.FromDate
+          in: query
+          description: Start date filter.
+          schema:
+            type: string
+            format: date-time
+        - name: Filters.ToDate
+          in: query
+          description: End date filter.
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Successfully returned list of blood glucose measurements.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GlucoseEntryResponseDTOPagedResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags: [GlucoseEntries]
+      summary: Record a blood glucose measurement
+      description: >
+        Records a new blood glucose measurement. Values are entered in mmol/L.
+        The typical target range for people with diabetes is 4.0–7.0 mmol/L.
+      operationId: GlucoseEntries_Create
+      security:
+        - Bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GlucoseEntryCreateUpdateDTO'
+            example:
+              userId: 42
+              value: 8.3
+              source: Manual
+              measuredAt: '2025-06-15T12:00:00Z'
+              note: Before lunch
+      responses:
+        '201':
+          description: Measurement successfully recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GlucoseEntryResponseDTO'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/GlucoseEntries/{id}:
+    get:
+      tags: [GlucoseEntries]
+      summary: Get a specific blood glucose measurement
+      operationId: GlucoseEntries_GetById
+      security:
+        - Bearer: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Successfully returned measurement.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GlucoseEntryResponseDTO'
+              example:
+                id: 33
+                userId: 42
+                value: 8.3
+                source: Manual
+                measuredAt: '2025-06-15T12:00:00Z'
+                note: Before lunch
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      tags: [GlucoseEntries]
+      summary: Update a blood glucose measurement
+      description: Updates the value, date, or note of the measurement.
+      operationId: GlucoseEntries_Update
+      security:
+        - Bearer: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GlucoseEntryCreateUpdateDTO'
+      responses:
+        '204':
+          description: Measurement successfully updated.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags: [GlucoseEntries]
+      summary: Delete a blood glucose measurement
+      operationId: GlucoseEntries_Delete
+      security:
+        - Bearer: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '204':
+          description: Measurement successfully deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/InsulinEntries:
+    get:
+      tags: [InsulinEntries]
+      summary: List insulin doses (paginated, with filters)
+      description: >
+        Returns a paginated list of insulin injection records.
+        Supports filtering by insulin type, date range, and number of units.
+      operationId: InsulinEntries_GetAll
+      security:
+        - Bearer: []
+      parameters:
+        - $ref: '#/components/parameters/PageNumber'
+        - $ref: '#/components/parameters/PageSize'
+        - name: Filters.CurrentUserId
+          in: query
+          description: Filter by user ID.
+          schema:
+            type: integer
+            format: int32
+        - name: Filters.Type
+          in: query
+          description: Filter by insulin type (e.g. 'Bolus', 'Basal', 'NovoRapid').
+          schema:
+            type: string
+            example: Bolus
+        - name: Filters.FromDate
+          in: query
+          description: Start date filter.
+          schema:
+            type: string
+            format: date-time
+        - name: Filters.ToDate
+          in: query
+          description: End date filter.
+          schema:
+            type: string
+            format: date-time
+        - name: Filters.MinUnits
+          in: query
+          description: Minimum number of insulin units.
+          schema:
+            type: number
+            format: double
+            minimum: 0
+        - name: Filters.MaxUnits
+          in: query
+          description: Maximum number of insulin units.
+          schema:
+            type: number
+            format: double
+            minimum: 0
+      responses:
+        '200':
+          description: Successfully returned list of insulin dose records.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InsulinEntryResponseDTOPagedResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags: [InsulinEntries]
+      summary: Record an insulin dose
+      description: >
+        Records an injected insulin dose. The `type` field describes the insulin type
+        (e.g. 'Bolus', 'Basal', or a brand name such as 'NovoRapid', 'Lantus').
+        Units must be a positive number.
+      operationId: InsulinEntries_Create
+      security:
+        - Bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InsulinEntryCreateUpdateDTO'
+            example:
+              userId: 42
+              units: 6.5
+              type: Bolus
+              injectedAt: '2025-06-15T12:35:00Z'
+              note: After lunch
+      responses:
+        '201':
+          description: Insulin dose successfully recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InsulinEntryResponseDTO'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/InsulinEntries/{id}:
+    get:
+      tags: [InsulinEntries]
+      summary: Get a specific insulin dose record
+      operationId: InsulinEntries_GetById
+      security:
+        - Bearer: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Successfully returned insulin dose record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InsulinEntryResponseDTO'
+              example:
+                id: 20
+                userId: 42
+                units: 6.5
+                type: Bolus
+                injectedAt: '2025-06-15T12:35:00Z'
+                note: After lunch
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      tags: [InsulinEntries]
+      summary: Update an insulin dose record
+      description: Updates the insulin dose record.
+      operationId: InsulinEntries_Update
+      security:
+        - Bearer: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InsulinEntryCreateUpdateDTO'
+      responses:
+        '204':
+          description: Insulin dose successfully updated.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags: [InsulinEntries]
+      summary: Delete an insulin dose record
+      operationId: InsulinEntries_Delete
+      security:
+        - Bearer: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '204':
+          description: Insulin dose successfully deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+
+  securitySchemes:
+    Bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        JWT Bearer authentication. Obtain a token via `/api/Auth/login` or `/api/Auth/register`
+        and send it in the header: `Authorization: Bearer <token>`.
+
+  parameters:
+    IdPath:
+      name: id
+      in: path
+      required: true
+      description: Unique numeric identifier of the resource.
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        example: 1
+
+    PageNumber:
+      name: PageNumber
+      in: query
+      description: Page number for pagination (starts at 1).
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        default: 1
+        example: 1
+
+    PageSize:
+      name: PageSize
+      in: query
+      description: Number of results per page (maximum 100).
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        maximum: 100
+        default: 20
+        example: 20
+
+  responses:
+    BadRequest:
+      description: Invalid input data. Check the validation errors.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationErrorResponse'
+
+    Unauthorized:
+      description: JWT token is missing or has expired. Authentication is required.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            message: Unauthorized. Please log in to access this resource.
+
+    Forbidden:
+      description: You do not have permission to access this resource.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            message: Access denied.
+
+    NotFound:
+      description: The requested resource was not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            message: Resource not found.
+
+  schemas:
+
+    UserRegisterDTO:
+      type: object
+      description: Registration data for a new user account.
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+          description: Unique username. Between 3 and 50 characters.
+          minLength: 3
+          maxLength: 50
+          example: john_doe
+        password:
+          type: string
+          description: >
+            Password. Minimum 8 characters; must contain at least one uppercase letter,
+            one digit, and one special character.
+          minLength: 8
+          format: password
+          example: S3cur3P@ssw0rd!
+      additionalProperties: false
+
+    UserLoginDTO:
+      type: object
+      description: Login credentials.
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+          description: Username.
+          example: john_doe
+        password:
+          type: string
+          description: Password.
+          format: password
+          example: S3cur3P@ssw0rd!
+      additionalProperties: false
+
+    AuthResponseDTO:
+      type: object
+      description: Response returned on successful authentication.
+      properties:
+        token:
+          type: string
+          description: JWT Bearer token to be used in subsequent requests.
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        userId:
+          type: integer
+          format: int32
+          description: ID of the authenticated user.
+          example: 42
+        username:
+          type: string
+          description: Username.
+          example: john_doe
+
+    UserUpdateDTO:
+      type: object
+      description: >
+        Data for creating or updating a user's diabetes profile.
+        ICR and ISF are the key parameters used to calculate the insulin dose.
+      properties:
+        username:
+          type: string
+          description: Username.
+          minLength: 3
+          maxLength: 50
+          example: john_doe
+        userId:
+          type: integer
+          format: int32
+          nullable: true
+          description: ID of the linked user account.
+          example: 42
+        icr:
+          type: number
+          format: double
+          description: >
+            Insulin-to-Carb Ratio. For example, a value of 10 means 1 unit of insulin
+            per 10 g of carbohydrates. Valid range: 1.0–100.0.
+          minimum: 1.0
+          maximum: 100.0
+          example: 10.0
+        isf:
+          type: number
+          format: double
+          description: >
+            Insulin Sensitivity Factor. Indicates by how many mmol/L blood glucose drops
+            per 1 unit of insulin. Valid range: 0.5–20.0.
+          minimum: 0.5
+          maximum: 20.0
+          example: 2.5
+        targetGlucose:
+          type: number
+          format: double
+          description: >
+            Target blood glucose in mmol/L. Used to calculate the correction dose.
+            Standard target range: 4.0–7.0 mmol/L.
+          minimum: 3.0
+          maximum: 15.0
+          example: 5.5
+      additionalProperties: false
+
+    UserResponseDTO:
+      type: object
+      description: User profile including diabetes parameters.
+      properties:
+        id:
+          type: integer
+          format: int32
+          description: Unique identifier of the profile.
+          example: 1
+        userId:
+          type: integer
+          format: int32
+          nullable: true
+          description: ID of the linked user account.
+          example: 42
+        username:
+          type: string
+          description: Username.
+          example: john_doe
+        icr:
+          type: number
+          format: double
+          description: Insulin-to-Carb Ratio.
+          example: 10.0
+        isf:
+          type: number
+          format: double
+          description: Insulin Sensitivity Factor (mmol/L per unit).
+          example: 2.5
+        targetGlucose:
+          type: number
+          format: double
+          description: Target blood glucose in mmol/L.
+          example: 5.5
+      additionalProperties: false
+
+    UserResponseDTOPagedResult:
+      type: object
+      description: Paginated list of user profiles.
+      allOf:
+        - $ref: '#/components/schemas/PagedResultBase'
+        - type: object
+          properties:
+            items:
+              type: array
+              description: List of user profiles for the current page.
+              items:
+                $ref: '#/components/schemas/UserResponseDTO'
+              nullable: true
+      additionalProperties: false
+
+    FoodCreateUpdateDTO:
+      type: object
+      description: Data for creating or updating a food item.
+      required:
+        - name
+        - carbPer100g
+        - proteinPer100g
+        - fatPer100g
+        - glycemicIndex
+      properties:
+        userId:
+          type: integer
+          format: int32
+          nullable: true
+          description: ID of the owning user. When null the item is global (available to all users).
+          example: 42
+        name:
+          type: string
+          description: Name of the food item. Maximum 200 characters.
+          minLength: 1
+          maxLength: 200
+          example: White Bread
+        carbPer100g:
+          type: number
+          format: double
+          description: Carbohydrates in grams per 100 g of product. Must be >= 0.
+          minimum: 0
+          maximum: 100
+          example: 49.0
+        proteinPer100g:
+          type: number
+          format: double
+          description: Protein in grams per 100 g of product. Must be >= 0.
+          minimum: 0
+          maximum: 100
+          example: 8.0
+        fatPer100g:
+          type: number
+          format: double
+          description: Fat in grams per 100 g of product. Must be >= 0.
+          minimum: 0
+          maximum: 100
+          example: 3.0
+        glycemicIndex:
+          type: number
+          format: double
+          description: Glycemic index (0–100). Values above 70 are considered high.
+          minimum: 0
+          maximum: 100
+          example: 75.0
+      additionalProperties: false
+
+    FoodResponseDTO:
+      type: object
+      description: Food item with full macronutrient data.
+      properties:
+        id:
+          type: integer
+          format: int32
+          description: Unique identifier of the food item.
+          example: 1
+        userId:
+          type: integer
+          format: int32
+          nullable: true
+          description: ID of the owner. Null indicates a global item.
+          example: null
+        name:
+          type: string
+          description: Name of the food item.
+          example: White Bread
+        carbPer100g:
+          type: number
+          format: double
+          description: Carbohydrates (g) per 100 g.
+          example: 49.0
+        proteinPer100g:
+          type: number
+          format: double
+          description: Protein (g) per 100 g.
+          example: 8.0
+        fatPer100g:
+          type: number
+          format: double
+          description: Fat (g) per 100 g.
+          example: 3.0
+        glycemicIndex:
+          type: number
+          format: double
+          description: Glycemic index (0–100).
+          example: 75.0
+        caloriesPer100g:
+          type: number
+          format: double
+          description: Calories per 100 g (calculated automatically).
+          example: 259.0
+      additionalProperties: false
+
+    FoodResponseDTOPagedResult:
+      type: object
+      description: Paginated list of food items.
+      allOf:
+        - $ref: '#/components/schemas/PagedResultBase'
+        - type: object
+          properties:
+            items:
+              type: array
+              description: List of food items for the current page.
+              items:
+                $ref: '#/components/schemas/FoodResponseDTO'
+              nullable: true
+      additionalProperties: false
+
+    FoodEntryCreateUpdateDTO:
+      type: object
+      description: Data for adding a food item to a meal.
+      required:
+        - foodId
+        - mealEntryId
+        - weigth
+      properties:
+        userId:
+          type: integer
+          format: int32
+          nullable: true
+          description: User ID. When null the currently authenticated user is used.
+          example: 42
+        foodId:
+          type: integer
+          format: int32
+          description: ID of the food item. Must exist in the database.
+          minimum: 1
+          example: 1
+        mealEntryId:
+          type: integer
+          format: int32
+          description: ID of the meal to which the food item is added. Must exist.
+          minimum: 1
+          example: 7
+        weigth:
+          type: number
+          format: double
+          description: Weight of the food item in grams. Must be > 0.
+          minimum: 0.1
+          maximum: 5000
+          example: 120.0
+      additionalProperties: false
+
+    FoodEntryResponseDTO:
+      type: object
+      description: Food entry with calculated macronutrients for the specific weight.
+      properties:
+        id:
+          type: integer
+          format: int32
+          description: Unique identifier of the entry.
+          example: 15
+        userId:
+          type: integer
+          format: int32
+          nullable: true
+          example: 42
+        foodId:
+          type: integer
+          format: int32
+          description: ID of the food item.
+          example: 1
+        mealEntryId:
+          type: integer
+          format: int32
+          description: ID of the associated meal.
+          example: 7
+        weigth:
+          type: number
+          format: double
+          description: Weight in grams.
+          example: 120.0
+        carbs:
+          type: number
+          format: double
+          description: Calculated carbohydrates (g) for the specified weight.
+          example: 58.8
+        protein:
+          type: number
+          format: double
+          description: Calculated protein (g) for the specified weight.
+          example: 9.6
+        fat:
+          type: number
+          format: double
+          description: Calculated fat (g) for the specified weight.
+          example: 3.6
+        calories:
+          type: number
+          format: double
+          description: Calculated calories for the specified weight.
+          example: 310.8
+      additionalProperties: false
+
+    FoodEntryResponseDTOPagedResult:
+      type: object
+      description: Paginated list of food entries.
+      allOf:
+        - $ref: '#/components/schemas/PagedResultBase'
+        - type: object
+          properties:
+            items:
+              type: array
+              description: List of food entries for the current page.
+              items:
+                $ref: '#/components/schemas/FoodEntryResponseDTO'
+              nullable: true
+      additionalProperties: false
+
+    MealEntryCreateUpdateDTO:
+      type: object
+      description: Data for creating or updating a meal record.
+      required:
+        - name
+      properties:
+        userId:
+          type: integer
+          format: int32
+          nullable: true
+          description: User ID. When null the currently authenticated user is used.
+          example: 42
+        name:
+          type: string
+          description: Name of the meal (e.g. "Breakfast", "Lunch", "Dinner"). Maximum 200 characters.
+          minLength: 1
+          maxLength: 200
+          example: Wednesday Lunch
+      additionalProperties: false
+
+    MealEntryResponseDTO:
+      type: object
+      description: Meal record with automatically calculated total nutritional values.
+      properties:
+        id:
+          type: integer
+          format: int32
+          description: Unique identifier of the meal record.
+          example: 7
+        userId:
+          type: integer
+          format: int32
+          nullable: true
+          example: 42
+        name:
+          type: string
+          description: Name of the meal.
+          example: Wednesday Lunch
+        totalCarb:
+          type: number
+          format: double
+          description: Total carbohydrates (g) for the entire meal — sum of all FoodEntry records.
+          example: 65.4
+        totalProtein:
+          type: number
+          format: double
+          description: Total protein (g) for the entire meal.
+          example: 22.1
+        totalFat:
+          type: number
+          format: double
+          description: Total fat (g) for the entire meal.
+          example: 14.8
+        totalCalories:
+          type: number
+          format: double
+          description: Total calories for the entire meal.
+          example: 479.2
+        createdAt:
+          type: string
+          format: date-time
+          description: Date and time the record was created (UTC).
+          example: '2025-06-15T12:30:00Z'
+      additionalProperties: false
+
+    MealEntryResponseDTOPagedResult:
+      type: object
+      description: Paginated list of meal records.
+      allOf:
+        - $ref: '#/components/schemas/PagedResultBase'
+        - type: object
+          properties:
+            items:
+              type: array
+              description: List of meal records for the current page.
+              items:
+                $ref: '#/components/schemas/MealEntryResponseDTO'
+              nullable: true
+      additionalProperties: false
+
+    GlucoseEntryCreateUpdateDTO:
+      type: object
+      description: Data for recording a blood glucose measurement.
+      required:
+        - value
+        - measuredAt
+      properties:
+        userId:
+          type: integer
+          format: int32
+          nullable: true
+          description: User ID. When null the currently authenticated user is used.
+          example: 42
+        value:
+          type: number
+          format: double
+          description: Blood glucose value in mmol/L. Must be in the range 1.0–30.0.
+          minimum: 1.0
+          maximum: 30.0
+          example: 8.3
+        source:
+          type: string
+          description: >
+            Source of the measurement. Recommended values: 'Manual', 'CGM', 'Laboratory'.
+          maxLength: 100
+          nullable: true
+          example: Manual
+        measuredAt:
+          type: string
+          format: date-time
+          description: Date and time of the measurement (UTC). Cannot be in the future.
+          example: '2025-06-15T12:00:00Z'
+        note:
+          type: string
+          description: Additional note (e.g. "Before meal", "After exercise"). Maximum 500 characters.
+          maxLength: 500
+          nullable: true
+          example: Before lunch
+      additionalProperties: false
+
+    GlucoseEntryResponseDTO:
+      type: object
+      description: Blood glucose measurement record.
+      properties:
+        id:
+          type: integer
+          format: int32
+          description: Unique identifier of the record.
+          example: 33
+        userId:
+          type: integer
+          format: int32
+          nullable: true
+          example: 42
+        value:
+          type: number
+          format: double
+          description: Blood glucose value in mmol/L.
+          example: 8.3
+        source:
+          type: string
+          description: Source of the measurement.
+          nullable: true
+          example: Manual
+        measuredAt:
+          type: string
+          format: date-time
+          description: Date and time of the measurement (UTC).
+          example: '2025-06-15T12:00:00Z'
+        note:
+          type: string
+          description: Note attached to the measurement.
+          nullable: true
+          example: Before lunch
+      additionalProperties: false
+
+    GlucoseEntryResponseDTOPagedResult:
+      type: object
+      description: Paginated list of blood glucose measurements.
+      allOf:
+        - $ref: '#/components/schemas/PagedResultBase'
+        - type: object
+          properties:
+            items:
+              type: array
+              description: List of measurements for the current page.
+              items:
+                $ref: '#/components/schemas/GlucoseEntryResponseDTO'
+              nullable: true
+      additionalProperties: false
+
+    InsulinEntryCreateUpdateDTO:
+      type: object
+      description: Data for recording an insulin dose.
+      required:
+        - units
+        - injectedAt
+      properties:
+        userId:
+          type: integer
+          format: int32
+          nullable: true
+          description: User ID. When null the currently authenticated user is used.
+          example: 42
+        units:
+          type: number
+          format: double
+          description: Number of insulin units. Must be > 0 and <= 100.
+          minimum: 0.5
+          maximum: 100.0
+          example: 6.5
+        type:
+          type: string
+          description: >
+            Insulin type. Recommended values: 'Bolus' (rapid-acting),
+            'Basal' (long-acting), or a brand name (e.g. 'NovoRapid', 'Lantus').
+          maxLength: 100
+          nullable: true
+          example: Bolus
+        injectedAt:
+          type: string
+          format: date-time
+          description: Date and time of injection (UTC). Cannot be in the future.
+          example: '2025-06-15T12:35:00Z'
+        note:
+          type: string
+          description: Additional note. Maximum 500 characters.
+          maxLength: 500
+          nullable: true
+          example: After lunch
+      additionalProperties: false
+
+    InsulinEntryResponseDTO:
+      type: object
+      description: Record of an injected insulin dose.
+      properties:
+        id:
+          type: integer
+          format: int32
+          description: Unique identifier of the record.
+          example: 20
+        userId:
+          type: integer
+          format: int32
+          nullable: true
+          example: 42
+        units:
+          type: number
+          format: double
+          description: Number of insulin units.
+          example: 6.5
+        type:
+          type: string
+          description: Insulin type.
+          nullable: true
+          example: Bolus
+        injectedAt:
+          type: string
+          format: date-time
+          description: Date and time of injection (UTC).
+          example: '2025-06-15T12:35:00Z'
+        note:
+          type: string
+          description: Note.
+          nullable: true
+          example: After lunch
+      additionalProperties: false
+
+    InsulinEntryResponseDTOPagedResult:
+      type: object
+      description: Paginated list of insulin dose records.
+      allOf:
+        - $ref: '#/components/schemas/PagedResultBase'
+        - type: object
+          properties:
+            items:
+              type: array
+              description: List of insulin dose records for the current page.
+              items:
+                $ref: '#/components/schemas/InsulinEntryResponseDTO'
+              nullable: true
+      additionalProperties: false
+
+    PagedResultBase:
+      type: object
+      description: Base structure for paginated results.
+      properties:
+        totalCount:
+          type: integer
+          format: int32
+          description: Total number of records matching the applied filters.
+          example: 87
+        pageNumber:
+          type: integer
+          format: int32
+          description: Current page number.
+          example: 1
+        pageSize:
+          type: integer
+          format: int32
+          description: Number of records per page.
+          example: 20
+        totalPages:
+          type: integer
+          format: int32
+          readOnly: true
+          description: Total number of pages (calculated automatically).
+          example: 5
+        hasPreviousPage:
+          type: boolean
+          readOnly: true
+          description: True if there is a previous page.
+          example: false
+        hasNextPage:
+          type: boolean
+          readOnly: true
+          description: True if there is a next page.
+          example: true
+
+    ErrorResponse:
+      type: object
+      description: Standard error response body.
+      properties:
+        message:
+          type: string
+          description: Human-readable description of the error.
+          example: Resource not found.
+        code:
+          type: string
+          description: Machine-readable error code (optional).
+          nullable: true
+          example: RESOURCE_NOT_FOUND
+
+    ValidationErrorResponse:
+      type: object
+      description: Response body returned when input validation fails.
+      properties:
+        message:
+          type: string
+          description: Summary error message.
+          example: One or more validation errors occurred.
+        errors:
+          type: object
+          description: Dictionary mapping field names to their validation error messages.
+          additionalProperties:
+            type: array
+            items:
+              type: string
+          example:
+            username:
+              - The username must be between 3 and 50 characters.
+            password:
+              - The password must be at least 8 characters long.
+              - The password must contain at least one uppercase letter.
+
+
+security:
+  - Bearer: []
