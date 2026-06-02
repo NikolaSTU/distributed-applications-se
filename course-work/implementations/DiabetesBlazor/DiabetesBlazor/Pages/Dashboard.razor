@@ -1,0 +1,727 @@
+﻿@page "/dashboard"
+@using System.Net.Http.Headers
+@using System.Text.Json
+@inject HttpClient Http
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+<div class="dashboard-container">
+
+    <div class="dashboard-header-inline">
+        <h2>📊 Твоето Табло</h2>
+        <span class="header-divider">|</span>
+        <p>Преглед на последната ти активност в реално време.</p>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="loading-status">
+            <div class="spinner-small"></div>
+            <span>Зареждане на данните...</span>
+        </div>
+    }
+    else if (!string.IsNullOrEmpty(apiError))
+    {
+        <div class="alert alert-danger">@apiError</div>
+    }
+    else
+    {
+        <div class="quick-stats-row">
+
+            <div class="stat-card blood-sugar-card">
+                <div class="card-icon">🩸</div>
+                <h3>Последна Кръвна Захар</h3>
+                @if (lastGlucose != null && TryGetDouble(lastGlucose.Value, "value", out var bgVal))
+                {
+                    <p class="stat-value">@bgVal.ToString("F1") <span class="unit">mmol/L</span></p>
+                    <span class="stat-unit">Източник: @GetSafeString(lastGlucose.Value, "source", "Няма")</span>
+                    <span class="stat-time">🕒 @FormatDateTime(GetSafeString(lastGlucose.Value, "measuredAt", ""))</span>
+                }
+                else
+                {
+                    <p class="stat-value empty">--</p>
+                    <span class="stat-unit">Няма записани данни</span>
+                    <span class="stat-time">🕒 --:--</span>
+                }
+            </div>
+
+            <div class="stat-card meal-card">
+                <div class="card-icon">🍽️</div>
+                <h3>Последно Хранене</h3>
+                @if (lastMealDetailed != null && TryGetDouble(lastMealDetailed.Value, "totalCarb", out var carbsVal))
+                {
+                    <p class="stat-value">@carbsVal.ToString("F0") <span class="unit">g въгл.</span></p>
+                    <span class="stat-unit">Наименование: @GetSafeString(lastMealDetailed.Value, "name", "Хранене")</span>
+                    <span class="stat-time">🕒 @FormatDateTime(GetSafeString(lastMealDetailed.Value, "createdAt", ""))</span>
+                }
+                else
+                {
+                    <p class="stat-value empty">--</p>
+                    <span class="stat-unit">Няма записани данни</span>
+                    <span class="stat-time">🕒 --:--</span>
+                }
+            </div>
+
+            <div class="stat-card insulin-card">
+                <div class="card-icon">💉</div>
+                <h3>Последен Инсулин</h3>
+                @if (lastInsulin != null && TryGetDouble(lastInsulin.Value, "units", out var unitsVal))
+                {
+                    <p class="stat-value">@unitsVal.ToString("F1") <span class="unit">ед.</span></p>
+                    <span class="stat-unit">Тип: @GetSafeString(lastInsulin.Value, "type", "Insulin")</span>
+                    <span class="stat-time">🕒 @FormatDateTime(GetSafeString(lastInsulin.Value, "injectedAt", ""))</span>
+                }
+                else
+                {
+                    <p class="stat-value empty">--</p>
+                    <span class="stat-unit">Няма записани данни</span>
+                    <span class="stat-time">🕒 --:--</span>
+                }
+            </div>
+
+        </div>
+
+        <div class="calculator-container">
+            <div class="calculator-header">
+                <h3>🧮 Калкулатор за Инсулинова Доза</h3>
+                <p>Избери едно от последните си 5 хранения, за да изчислиш необходимата доза.</p>
+            </div>
+
+            <div class="calculator-layout">
+                <div class="calculator-inputs">
+                    @if (recentMeals != null && recentMeals.Value.GetArrayLength() > 0)
+                    {
+                        <div class="form-group">
+                            <label for="mealSelect">Избери хранене:</label>
+                            <select id="mealSelect" class="form-select" @onchange="OnMealSelected">
+                                <option value="">-- Избери от списъка --</option>
+                                @foreach (var meal in recentMeals.Value.EnumerateArray())
+                                {
+                                    if (meal.TryGetProperty("id", out var idProp))
+                                    {
+                                        <option value="@idProp.GetInt32()">@GetSafeString(meal, "name", "Хранене") (@FormatDateTime(GetSafeString(meal, "createdAt", "")))</option>
+                                    }
+                                }
+                            </select>
+                        </div>
+
+                        @if (isMealLoading)
+                        {
+                            <div class="spinner-inline">Зареждане на детайли за храненето...</div>
+                        }
+                        else if (selectedMealDetailed.HasValue)
+                        {
+                            <div class="calc-info">
+                                <div class="info-row">
+                                    <span>Избрано хранене:</span>
+                                    <strong>@GetSafeString(selectedMealDetailed.Value, "name", "Хранене")</strong>
+                                </div>
+                                <div class="info-row">
+                                    <span>Въглехидрати в него:</span>
+                                    <strong>@GetSafeString(selectedMealDetailed.Value, "totalCarb", "0") g</strong>
+                                </div>
+                            </div>
+
+                            if (selectedMealDetailed.Value.TryGetProperty("id", out var currentIdProp))
+                            {
+                                var selectedId = currentIdProp.GetInt32();
+                                <button class="btn-calculate" @onclick="() => CalculateDoseAsync(selectedId)" disabled="@isCalculating">
+                                    @if (isCalculating)
+                                    {
+                                        <span class="spinner-btn"></span>
+                                        <span>Изчисляване...</span>
+                                    }
+                                    else
+                                    {
+                                        <span>Изчисли Доза</span>
+                                    }
+                                </button>
+                            }
+                        }
+                    }
+                    else
+                    {
+                        <div class="calc-warning">
+                            ⚠️ Няма открити скорошни хранения в профила ти.
+                        </div>
+                    }
+                </div>
+
+                <div class="calculator-results">
+                    @if (calculatedDose.HasValue)
+                    {
+                        <div class="calc-result-card active-green">
+                            <span class="result-label">Препоръчителна доза:</span>
+                            <span class="result-value">@calculatedDose.Value.ToString("F1") <span class="result-unit">единици</span></span>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="calc-result-card empty-grey">
+                            <span class="result-label">Препоръчителна доза:</span>
+                            <span class="result-value empty">-- <span class="result-unit">единици</span></span>
+                            <span class="result-hint">Избери хранене и натисни бутона за изчисляване.</span>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private bool isLoading = true;
+    private bool isCalculating = false;
+    private bool isMealLoading = false;
+    private string apiError = string.Empty;
+    private double? calculatedDose = null;
+
+    private JsonElement? lastGlucose = null;
+    private JsonElement? recentMeals = null;
+    private JsonElement? lastMealDetailed = null;
+    private JsonElement? selectedMealDetailed = null;
+    private JsonElement? lastInsulin = null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var token = await JS.InvokeAsync<string>("localStorage.getItem", "authToken");
+            if (string.IsNullOrEmpty(token))
+            {
+                Navigation.NavigateTo("/");
+                return;
+            }
+
+            var authHeader = new AuthenticationHeaderValue("Bearer", token);
+
+            lastGlucose = await FetchLatestEntryAsync("api/GlucoseEntries?pageNumber=1&pageSize=1", authHeader);
+            lastInsulin = await FetchLatestEntryAsync("api/InsulinEntries?pageNumber=1&pageSize=1", authHeader);
+            recentMeals = await FetchMealsListAsync("api/MealEntries?pageNumber=1&pageSize=5", authHeader);
+
+            if (recentMeals.HasValue && recentMeals.Value.GetArrayLength() > 0)
+            {
+                var firstMeal = recentMeals.Value[0];
+                if (firstMeal.TryGetProperty("id", out var idProp))
+                {
+                    lastMealDetailed = await FetchEntryByIdAsync($"api/MealEntries/{idProp.GetInt32()}", authHeader);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            apiError = $"Грешка при комуникация с бекенда: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task<JsonElement?> FetchLatestEntryAsync(string url, AuthenticationHeaderValue authHeader)
+    {
+        try
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Authorization = authHeader;
+
+            var response = await Http.SendAsync(request);
+            if (response.IsSuccessStatusCode)
+            {
+                var jsonString = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(jsonString);
+
+                if (doc.RootElement.TryGetProperty("items", out var itemsProp) || doc.RootElement.TryGetProperty("Items", out itemsProp))
+                {
+                    if (itemsProp.GetArrayLength() > 0)
+                    {
+                        return itemsProp[0].Clone();
+                    }
+                }
+            }
+            return null;
+        }
+        catch { return null; }
+    }
+
+    private async Task<JsonElement?> FetchMealsListAsync(string url, AuthenticationHeaderValue authHeader)
+    {
+        try
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Authorization = authHeader;
+
+            var response = await Http.SendAsync(request);
+            if (response.IsSuccessStatusCode)
+            {
+                var jsonString = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(jsonString);
+
+                if (doc.RootElement.TryGetProperty("items", out var itemsProp) || doc.RootElement.TryGetProperty("Items", out itemsProp))
+                {
+                    return itemsProp.Clone();
+                }
+            }
+            return null;
+        }
+        catch { return null; }
+    }
+
+    private async Task<JsonElement?> FetchEntryByIdAsync(string url, AuthenticationHeaderValue authHeader)
+    {
+        try
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Authorization = authHeader;
+
+            var response = await Http.SendAsync(request);
+            if (response.IsSuccessStatusCode)
+            {
+                var jsonString = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(jsonString);
+                return doc.RootElement.Clone();
+            }
+            return null;
+        }
+        catch { return null; }
+    }
+
+    private async Task OnMealSelected(ChangeEventArgs e)
+    {
+        calculatedDose = null;
+        var selectedValue = e.Value?.ToString();
+
+        if (string.IsNullOrEmpty(selectedValue) || !int.TryParse(selectedValue, out var mealId))
+        {
+            selectedMealDetailed = null;
+            return;
+        }
+
+        isMealLoading = true;
+        try
+        {
+            var token = await JS.InvokeAsync<string>("localStorage.getItem", "authToken");
+            if (!string.IsNullOrEmpty(token))
+            {
+                var authHeader = new AuthenticationHeaderValue("Bearer", token);
+                selectedMealDetailed = await FetchEntryByIdAsync($"api/MealEntries/{mealId}", authHeader);
+            }
+        }
+        finally
+        {
+            isMealLoading = false;
+        }
+    }
+
+    private async Task CalculateDoseAsync(int id)
+    {
+        isCalculating = true;
+        calculatedDose = null;
+        try
+        {
+            var token = await JS.InvokeAsync<string>("localStorage.getItem", "authToken");
+            var request = new HttpRequestMessage(HttpMethod.Get, $"api/MealEntries/{id}/dose");
+            if (!string.IsNullOrEmpty(token))
+            {
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            }
+
+            var response = await Http.SendAsync(request);
+            if (response.IsSuccessStatusCode)
+            {
+                var responseString = await response.Content.ReadAsStringAsync();
+                if (double.TryParse(responseString, out var result))
+                {
+                    calculatedDose = result;
+                }
+            }
+            else
+            {
+                apiError = "Неуспешно извличане на калкулацията от бекенда.";
+            }
+        }
+        catch (Exception ex)
+        {
+            apiError = $"Грешка при изчисляване на дозата: {ex.Message}";
+        }
+        finally
+        {
+            isCalculating = false;
+        }
+    }
+
+    private bool TryGetDouble(JsonElement element, string propName, out double value)
+    {
+        value = 0;
+        var camelCase = char.ToLower(propName[0]) + propName.Substring(1);
+        var pascalCase = char.ToUpper(propName[0]) + propName.Substring(1);
+
+        if (element.TryGetProperty(camelCase, out var prop) || element.TryGetProperty(pascalCase, out prop))
+        {
+            if (prop.ValueKind == JsonValueKind.Number) return prop.TryGetDouble(out value);
+            if (prop.ValueKind == JsonValueKind.String && double.TryParse(prop.GetString(), out var parsed))
+            {
+                value = parsed;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private string GetSafeString(JsonElement element, string propName, string fallback)
+    {
+        var camelCase = char.ToLower(propName[0]) + propName.Substring(1);
+        var pascalCase = char.ToUpper(propName[0]) + propName.Substring(1);
+
+        if (element.TryGetProperty(camelCase, out var prop) || element.TryGetProperty(pascalCase, out prop))
+        {
+            if (prop.ValueKind == JsonValueKind.Number) return prop.GetRawText();
+            if (prop.ValueKind == JsonValueKind.String) return prop.GetString() ?? fallback;
+            return prop.GetRawText();
+        }
+        return fallback;
+    }
+
+    private string FormatDateTime(string isoString)
+    {
+        if (string.IsNullOrEmpty(isoString) || !DateTime.TryParse(isoString, out var dt)) return "--:--";
+        return dt.ToString("HH:mm ч. на dd.MM.yyyy г.");
+    }
+}
+
+<style>
+    .dashboard-container {
+        max-width: 1200px;
+        margin: 0 auto;
+        font-family: 'Segoe UI', system-ui, sans-serif;
+    }
+
+    .dashboard-header-inline {
+        display: flex;
+        align-items: center;
+        margin-bottom: 25px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid #eef2f5;
+    }
+
+        .dashboard-header-inline h2 {
+            margin: 0;
+            font-size: 22px;
+            color: #2c3e50;
+            font-weight: 600;
+        }
+
+    .header-divider {
+        margin: 0 15px;
+        color: #b2bec3;
+        font-weight: 300;
+        font-size: 18px;
+    }
+
+    .dashboard-header-inline p {
+        margin: 0;
+        color: #7f8c8d;
+        font-size: 14px;
+    }
+
+    .quick-stats-row {
+        display: flex;
+        gap: 20px;
+        width: 100%;
+        margin-bottom: 35px;
+    }
+
+    .stat-card {
+        flex: 1;
+        background: white;
+        padding: 22px;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.02);
+        border: 1px solid #eef2f5;
+        position: relative;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        min-height: 140px;
+    }
+
+    .blood-sugar-card {
+        border-top: 4px solid #e74c3c;
+    }
+
+    .meal-card {
+        border-top: 4px solid #2ecc71;
+    }
+
+    .insulin-card {
+        border-top: 4px solid #9b59b6;
+    }
+
+    .card-icon {
+        position: absolute;
+        top: 15px;
+        right: 20px;
+        font-size: 22px;
+        opacity: 0.7;
+    }
+
+    .stat-card h3 {
+        margin: 0 0 12px 0;
+        font-size: 13px;
+        color: #8a99a8;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .stat-value {
+        font-size: 32px;
+        font-weight: 700;
+        color: #2c3e50;
+        margin: 0 0 5px 0;
+    }
+
+        .stat-value .unit {
+            font-size: 15px;
+            font-weight: 500;
+            color: #7f8c8d;
+            margin-left: 2px;
+        }
+
+        .stat-value.empty {
+            color: #bdc3c7;
+        }
+
+    .stat-unit {
+        font-size: 13px;
+        color: #4b5563;
+        font-weight: 500;
+        margin-bottom: auto;
+    }
+
+    .stat-time {
+        font-size: 11px;
+        color: #9ca3af;
+        padding-top: 10px;
+        border-top: 1px dashed #f3f4f6;
+        margin-top: 12px;
+    }
+
+    .calculator-container {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        padding: 25px;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.01);
+    }
+
+    .calculator-header h3 {
+        margin: 0 0 5px 0;
+        color: #1e293b;
+        font-size: 18px;
+    }
+
+    .calculator-header p {
+        margin: 0 0 20px 0;
+        color: #64748b;
+        font-size: 14px;
+    }
+
+    .calculator-layout {
+        display: flex;
+        gap: 25px;
+        width: 100%;
+        align-items: flex-start;
+    }
+
+    .calculator-inputs {
+        flex: 2;
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+    }
+
+    .calculator-results {
+        flex: 1;
+        min-height: 150px;
+        display: flex;
+    }
+
+    .form-group {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+        .form-group label {
+            font-size: 14px;
+            font-weight: 600;
+            color: #475569;
+        }
+
+    .form-select {
+        padding: 10px;
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        font-size: 14px;
+        background-color: #fff;
+        color: #1e293b;
+        outline: none;
+    }
+
+        .form-select:focus {
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 2px rgba(59,130,246,0.1);
+        }
+
+    .calc-info {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        background: #f8fafc;
+        padding: 15px;
+        border-radius: 8px;
+        border: 1px solid #f1f5f9;
+    }
+
+    .info-row {
+        display: flex;
+        justify-content: space-between;
+        font-size: 14px;
+        color: #334155;
+    }
+
+    .btn-calculate {
+        background: #3b82f6;
+        color: white;
+        border: none;
+        padding: 12px 20px;
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 14px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        transition: background 0.2s;
+        width: fit-content;
+    }
+
+        .btn-calculate:hover {
+            background: #2563eb;
+        }
+
+        .btn-calculate:disabled {
+            background: #94a3b8;
+            cursor: not-allowed;
+        }
+
+    .calc-result-card {
+        width: 100%;
+        padding: 22px;
+        border-radius: 12px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        transition: all 0.3s ease;
+        border: 1px solid transparent;
+    }
+
+        .calc-result-card.empty-grey {
+            background: #f1f5f9;
+            border-color: #e2e8f0;
+            color: #64748b;
+        }
+
+        .calc-result-card.active-green {
+            background: #f0fdf4;
+            border-color: #bbf7d0;
+            color: #166534;
+        }
+
+    .result-label {
+        font-size: 14px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 8px;
+        color: inherit;
+    }
+
+    .result-value {
+        font-size: 36px;
+        font-weight: 800;
+        color: #15803d;
+    }
+
+    .calc-result-card.empty-grey .result-value {
+        color: #94a3b8;
+    }
+
+    .result-unit {
+        font-size: 16px;
+        font-weight: 500;
+        color: inherit;
+        margin-left: 3px;
+    }
+
+    .result-hint {
+        font-size: 12px;
+        color: #94a3b8;
+        margin-top: 10px;
+        line-height: 1.4;
+    }
+
+    .calc-warning {
+        padding: 15px;
+        background: #fffbeb;
+        color: #b45309;
+        border: 1px solid #fef3c7;
+        border-radius: 8px;
+        font-size: 14px;
+    }
+
+    .spinner-inline {
+        font-size: 13px;
+        color: #64748b;
+        font-style: italic;
+    }
+
+    .loading-status {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        padding: 40px;
+        color: #7f8c8d;
+    }
+
+    .spinner-small {
+        border: 3px solid #f3f3f3;
+        border-top: 3px solid #3498db;
+        border-radius: 50%;
+        width: 20px;
+        height: 20px;
+        animation: spin 0.8s linear infinite;
+    }
+
+    .spinner-btn {
+        border: 2px solid #ffffff;
+        border-top: 2px solid transparent;
+        border-radius: 50%;
+        width: 16px;
+        height: 16px;
+        animation: spin 0.8s linear infinite;
+    }
+   
+
+    .alert {
+        padding: 15px;
+        background: #f8d7da;
+        color: #721c24;
+        border-radius: 6px;
+        text-align: center;
+        margin-bottom: 20px;
+    }
+</style>

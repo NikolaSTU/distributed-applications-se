@@ -1,0 +1,414 @@
+﻿@page "/logbook/create/{EntryType}"
+@using System.Net.Http.Headers
+@using System.Text.Json
+@using System.Text
+@inject HttpClient Http
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+<div class="form-page-container">
+    <div class="form-header">
+        <button class="btn-back" @onclick="GoBack">◀ Назад към дневника</button>
+        <h2>@(EntryType == "glucose" ? "➕ Добавяне на Запис за Кръвна Захар" : "➕ Добавяне на Запис за Инсулин")</h2>
+        <p>@(EntryType == "glucose" ? "Въведи нови данни за измерението на кръвната захар." : "Въведи нови данни за инсулинова инжекция.")</p>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger">@errorMessage</div>
+    }
+
+    <div class="form-card">
+        @if (EntryType == "glucose")
+        {
+            <div class="form-group">
+                <label>Стойност (mmol/L)*</label>
+                <input type="number" step="0.1" class="form-control" placeholder="Прим. 5.5" @bind="glucoseValue" />
+            </div>
+
+            <div class="form-group">
+                <label>Дата и час на измерението*</label>
+                <input type="datetime-local" class="form-control" @bind="glucoseMeasuredAt" />
+            </div>
+
+            <div class="form-group">
+                <label>Източник*</label>
+                <input type="text" class="form-control" placeholder="Прим. Глюкометър, Сензор" @bind="glucoseSource" />
+            </div>
+
+            <div class="form-group">
+                <label>Забележка</label>
+                <textarea class="form-control" rows="3" placeholder="Допълнителна информация..." @bind="glucoseNote"></textarea>
+            </div>
+        }
+        else
+        {
+            <div class="form-group">
+                <label>Единици инсулин*</label>
+                <input type="number" step="0.1" class="form-control" placeholder="Прим. 10.5" @bind="insulinUnits" />
+            </div>
+
+            <div class="form-group">
+                <label>Дата и час на инжекцията*</label>
+                <input type="datetime-local" class="form-control" @bind="insulinInjectedAt" />
+            </div>
+
+            <div class="form-group">
+                <label>Тип инсулин*</label>
+                <select class="form-control" @bind="insulinType">
+                    <option value="">-- Избери тип --</option>
+                    <option value="Бързодействащ">Бързодействащ</option>
+                    <option value="Дълготрайно действащ">Дълготрайно действащ</option>
+                    <option value="Смесен">Смесен</option>
+                    <option value="Други">Други</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>Забележка</label>
+                <textarea class="form-control" rows="3" placeholder="Допълнителна информация..." @bind="insulinNote"></textarea>
+            </div>
+        }
+
+        <div class="form-actions">
+            <button class="btn btn-save" @onclick="SaveEntryAsync" disabled="@isSaving">
+                @if (isSaving)
+                {
+                    <span>Запис...</span>
+                }
+                else
+                {
+                    <span>💾 Запази Записа</span>
+                }
+            </button>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public string EntryType { get; set; } = "glucose";
+
+    private decimal glucoseValue;
+    private DateTime glucoseMeasuredAt = DateTime.Now;
+    private string glucoseSource = string.Empty;
+    private string glucoseNote = string.Empty;
+
+    private decimal insulinUnits;
+    private DateTime insulinInjectedAt = DateTime.Now;
+    private string insulinType = string.Empty;
+    private string insulinNote = string.Empty;
+
+    private bool isSaving = false;
+    private string errorMessage = string.Empty;
+
+    private async Task SaveEntryAsync()
+    {
+        try
+        {
+            errorMessage = string.Empty;
+
+            if (EntryType == "glucose")
+            {
+                if (glucoseValue == 0)
+                {
+                    errorMessage = "Стойността на глюкозата е задължителна.";
+                    return;
+                }
+                if (glucoseValue < 0.1m || glucoseValue > 35.0m)
+                {
+                    errorMessage = "Стойността на кръвната захар трябва да бъде между 0.1 и 35.0 mmol/L.";
+                    return;
+                }
+
+                if (string.IsNullOrWhiteSpace(glucoseSource))
+                {
+                    errorMessage = "Източникът на измерване е задължителен.";
+                    return;
+                }
+                if (glucoseSource.Length > 50)
+                {
+                    errorMessage = "Източникът не може да бъде по-дълъг от 50 символа.";
+                    return;
+                }
+
+                if (glucoseMeasuredAt == default)
+                {
+                    errorMessage = "Датата и часът на измерване са задължителни.";
+                    return;
+                }
+                if (glucoseMeasuredAt.ToUniversalTime() > DateTime.UtcNow.AddMinutes(5))
+                {
+                    errorMessage = "Не можете да въвеждате измерване с бъдеща дата и час.";
+                    return;
+                }
+
+                if (!string.IsNullOrEmpty(glucoseNote) && glucoseNote.Length > 500)
+                {
+                    errorMessage = "Бележката не може да бъде по-дълга от 500 символа.";
+                    return;
+                }
+
+                await SaveGlucoseEntryAsync();
+            }
+            else
+            {
+                if (insulinUnits == 0)
+                {
+                    errorMessage = "Количеството инсулин е задължително.";
+                    return;
+                }
+                if (insulinUnits <= 0.1m)
+                {
+                    errorMessage = "Инсулиновите единици трябва да бъдат по-големи от 0.1.";
+                    return;
+                }
+                if (insulinUnits > 100m)
+                {
+                    errorMessage = "Въведеното количество единици е прекалено високо за една доза (максимум 100 единици).";
+                    return;
+                }
+
+                if (string.IsNullOrWhiteSpace(insulinType))
+                {
+                    errorMessage = "Типът на инсулина е задължителна.";
+                    return;
+                }
+                if (insulinType.Length > 50)
+                {
+                    errorMessage = "Типът на инсулина не може да надвишава 50 символа.";
+                    return;
+                }
+
+                if (insulinInjectedAt == default)
+                {
+                    errorMessage = "Датата и часът на инжектиране са задължителни.";
+                    return;
+                }
+                if (insulinInjectedAt.ToUniversalTime() > DateTime.UtcNow.AddMinutes(5))
+                {
+                    errorMessage = "Не можете да въвеждате инжекция с бъдеща дата и час.";
+                    return;
+                }
+
+                if (!string.IsNullOrEmpty(insulinNote) && insulinNote.Length > 500)
+                {
+                    errorMessage = "Бележката не може да бъде по-дълга от 500 символа.";
+                    return;
+                }
+
+                await SaveInsulinEntryAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Системна грешка: {ex.Message}";
+        }
+    }
+
+    private async Task SaveGlucoseEntryAsync()
+    {
+        isSaving = true;
+        try
+        {
+            var token = await JS.InvokeAsync<string>("localStorage.getItem", "authToken");
+
+            var glucoseDto = new
+            {
+                userId = (int?)null,
+                value = glucoseValue,
+                source = glucoseSource,
+                measuredAt = glucoseMeasuredAt.ToUniversalTime(),
+                note = glucoseNote
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Post, "api/GlucoseEntries");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            request.Content = new StringContent(JsonSerializer.Serialize(glucoseDto), Encoding.UTF8, "application/json");
+
+            var response = await Http.SendAsync(request);
+            if (response.IsSuccessStatusCode)
+            {
+                Navigation.NavigateTo("/logbook");
+            }
+            else
+            {
+                var responseContent = await response.Content.ReadAsStringAsync();
+                errorMessage = $"Грешка от сървъра: {responseContent}";
+            }
+        }
+        finally { isSaving = false; }
+    }
+
+    private async Task SaveInsulinEntryAsync()
+    {
+        isSaving = true;
+        try
+        {
+            var token = await JS.InvokeAsync<string>("localStorage.getItem", "authToken");
+
+            var insulinDto = new
+            {
+                userId = (int?)null,
+                units = insulinUnits,
+                type = insulinType,
+                injectedAt = insulinInjectedAt.ToUniversalTime(),
+                note = insulinNote
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Post, "api/InsulinEntries");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            request.Content = new StringContent(JsonSerializer.Serialize(insulinDto), Encoding.UTF8, "application/json");
+
+            var response = await Http.SendAsync(request);
+            if (response.IsSuccessStatusCode)
+            {
+                Navigation.NavigateTo("/logbook");
+            }
+            else
+            {
+                var responseContent = await response.Content.ReadAsStringAsync();
+                errorMessage = $"Грешка от сървъра: {responseContent}";
+            }
+        }
+        finally { isSaving = false; }
+    }
+
+    private void GoBack() => Navigation.NavigateTo("/logbook");
+}
+
+<style>
+    .form-page-container {
+        max-width: 600px;
+        margin: 0 auto;
+        font-family: 'Segoe UI', system-ui, sans-serif;
+        padding: 5px;
+    }
+
+    .form-header {
+        margin-bottom: 20px;
+        padding-bottom: 15px;
+        border-bottom: 1px solid #eef2f5;
+    }
+
+        .form-header h2 {
+            margin: 10px 0 5px 0;
+            font-size: 20px;
+            color: #2c3e50;
+            font-weight: 600;
+        }
+
+        .form-header p {
+            margin: 0;
+            color: #7f8c8d;
+            font-size: 13px;
+        }
+
+    .btn-back {
+        background: none;
+        border: none;
+        color: #3b82f6;
+        font-weight: 600;
+        cursor: pointer;
+        font-size: 13px;
+        margin-bottom: 10px;
+    }
+
+        .btn-back:hover {
+            text-decoration: underline;
+        }
+
+    .form-card {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        padding: 20px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.01);
+    }
+
+    .form-group {
+        margin-bottom: 15px;
+        display: flex;
+        flex-direction: column;
+    }
+
+        .form-group label {
+            font-size: 13px;
+            font-weight: 600;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            margin-bottom: 6px;
+        }
+
+    .form-control {
+        padding: 10px 12px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        font-size: 14px;
+        outline: none;
+        background: white;
+        font-family: inherit;
+    }
+
+        .form-control:focus {
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+    textarea.form-control {
+        resize: vertical;
+        min-height: 80px;
+    }
+
+    .form-actions {
+        display: flex;
+        gap: 10px;
+        margin-top: 20px;
+    }
+
+    .btn {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 6px;
+        font-weight: 600;
+        font-size: 14px;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .btn-save {
+        background: #3b82f6;
+        color: white;
+        flex: 1;
+    }
+
+        .btn-save:hover:not(:disabled) {
+            background: #2563eb;
+        }
+
+        .btn-save:disabled {
+            background: #cbd5e1;
+            cursor: not-allowed;
+        }
+
+    .alert {
+        padding: 12px 14px;
+        background: #f8d7da;
+        color: #721c24;
+        border-radius: 6px;
+        margin-bottom: 15px;
+        font-size: 13px;
+    }
+
+    .alert-danger {
+        background: #f8d7da;
+        color: #721c24;
+    }
+
+    .loading-status {
+        text-align: center;
+        padding: 40px 20px;
+        color: #64748b;
+        font-size: 14px;
+    }
+</style>

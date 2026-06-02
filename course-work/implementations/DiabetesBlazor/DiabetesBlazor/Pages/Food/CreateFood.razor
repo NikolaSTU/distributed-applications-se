@@ -1,0 +1,161 @@
+﻿@page "/foods/create"
+@using System.Net.Http.Headers
+@using System.Text.Json
+@using System.Text
+@inject HttpClient Http
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+<div class="form-page-container">
+    <div class="form-header">
+        <button class="btn-back" @onclick="GoBack">◀ Назад към списъка</button>
+        <h2>➕ Добавяне на Нова Храна</h2>
+        <p>Въведи макронутриентите на 100 грама продукт. Калориите ще се изчислят автоматично.</p>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger">@errorMessage</div>
+    }
+
+    <div class="form-card">
+        <div class="form-group">
+            <label>Наименование на храната*</label>
+            <input type="text" class="form-control" placeholder="Прим. Овесени ядки" @bind="foodName" />
+        </div>
+
+        <div class="form-grid-3">
+            <div class="form-group">
+                <label>Въглехидрати (0-100g)*</label>
+                <input type="number" step="0.1" min="0" max="100" class="form-control" @bind="carbPer100g" @bind:event="oninput" />
+            </div>
+            <div class="form-group">
+                <label>Протеини (0-100g)*</label>
+                <input type="number" step="0.1" min="0" max="100" class="form-control" @bind="proteinPer100g" @bind:event="oninput" />
+            </div>
+            <div class="form-group">
+                <label>Мазнини (0-100g)*</label>
+                <input type="number" step="0.1" min="0" max="100" class="form-control" @bind="fatPer100g" @bind:event="oninput" />
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>Гликемичен индекс (0-100)</label>
+            <input type="number" step="1" min="0" max="100" class="form-control" @bind="glycemicIndex" />
+        </div>
+
+        <div class="macro-summary-bar @(TotalMacros > 100 ? "over-limit" : "")">
+            Общ сбор на макросите: <strong>@TotalMacros.ToString("F1") g</strong> / 100 g
+        </div>
+
+        <div class="form-actions">
+            <button class="btn btn-save" @onclick="SaveFoodAsync" disabled="@(isSaving || TotalMacros > 100)">
+                @if (isSaving)
+                {
+                    <span>Запис...</span>
+                }
+                else
+                {
+                    <span>💾 Запази Храната</span>
+                }
+            </button>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string foodName = string.Empty;
+    private decimal carbPer100g;
+    private decimal proteinPer100g;
+    private decimal fatPer100g;
+    private decimal glycemicIndex;
+
+    private bool isSaving = false;
+    private string errorMessage = string.Empty;
+
+    private decimal TotalMacros => carbPer100g + proteinPer100g + fatPer100g;
+
+    private async Task SaveFoodAsync()
+    {
+        if (string.IsNullOrWhiteSpace(foodName) || foodName.Length < 2)
+        {
+            errorMessage = "Името на храната трябва да съдържа поне 2 символа.";
+            return;
+        }
+
+        if (carbPer100g < 0 || carbPer100g > 100 || proteinPer100g < 0 || proteinPer100g > 100 || fatPer100g < 0 || fatPer100g > 100)
+        {
+            errorMessage = "Всички макронутриенти трябва да бъдат между 0 и 100 грама.";
+            return;
+        }
+
+        if (TotalMacros > 100)
+        {
+            errorMessage = "Общият сбор на въглехидрати, протеини и мазнини не може да надвишава 100 грама.";
+            return;
+        }
+
+        if (glycemicIndex < 0 || glycemicIndex > 100)
+        {
+            errorMessage = "Гликемичният индекс трябва да бъде между 0 и 100.";
+            return;
+        }
+
+        isSaving = true;
+        errorMessage = string.Empty;
+
+        try
+        {
+            var token = await JS.InvokeAsync<string>("localStorage.getItem", "authToken");
+
+            var newFoodDto = new FoodCreateUpdateDTO
+            {
+                UserId = null, 
+                Name = foodName,
+                CarbPer100g = carbPer100g,
+                ProteinPer100g = proteinPer100g,
+                FatPer100g = fatPer100g,
+                GlycemicIndex = glycemicIndex
+            };
+
+            var serializeOptions = new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = null
+            };
+
+            var jsonContent = JsonSerializer.Serialize(newFoodDto, serializeOptions);
+
+            var request = new HttpRequestMessage(HttpMethod.Post, "api/Foods");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            request.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+            var response = await Http.SendAsync(request);
+            if (response.IsSuccessStatusCode)
+            {
+                Navigation.NavigateTo("/foods");
+            }
+            else
+            {
+                var responseContent = await response.Content.ReadAsStringAsync();
+                errorMessage = $"Грешка при валидация от сървъра: {responseContent}";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Системна грешка: {ex.Message}";
+        }
+        finally { isSaving = false; }
+    }
+
+    private void GoBack() => Navigation.NavigateTo("/foods");
+
+    public class FoodCreateUpdateDTO
+    {
+        public int? UserId { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public decimal CarbPer100g { get; set; }
+        public decimal ProteinPer100g { get; set; }
+        public decimal FatPer100g { get; set; }
+        public decimal GlycemicIndex { get; set; }
+    }
+}

@@ -1,0 +1,1007 @@
+﻿@page "/meals"
+@using System.Net.Http.Headers
+@using System.Text.Json
+@using System.Text
+@using System.Globalization
+@inject HttpClient Http
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+<div class="meals-container">
+    <div class="page-header-inline">
+        <h2>🍽️ Дневник на Храненията</h2>
+        <span class="header-divider">|</span>
+        <p>Преглед и добавяне на ежедневни хранения</p>
+        <button class="btn-add-food" @onclick="OpenCreateMealModal">＋ Ново Хранене</button>
+    </div>
+
+    <div class="filter-panel-compact">
+        <div class="filter-grid">
+            <div class="filter-item">
+                <label>Търсене по име</label>
+                <input type="text" class="form-control-sm" @bind="filterName" placeholder="Напр. Закуска..." />
+            </div>
+            <div class="filter-item">
+                <label>От дата</label>
+                <input type="date" class="form-control-sm" @bind="filterFromDate" />
+            </div>
+            <div class="filter-item">
+                <label>До дата</label>
+                <input type="date" class="form-control-sm" @bind="filterToDate" />
+            </div>
+
+            <div class="filter-item">
+                <label>Сортирай по</label>
+                <select class="form-select-sm" @bind="sortBy">
+                    <option value="Id">Най-нови първо (Id)</option>
+                    <option value="CreatedAt">Дата/Час</option>
+                    <option value="Name">Име</option>
+                </select>
+            </div>
+
+            <div class="filter-item width-auto">
+                <label>Посока / Редове</label>
+                <div class="range-inputs">
+                    <button class="btn-sm btn-secondary btn-direction" @onclick="ToggleSortDirection" title="@(isDescending ? "Низходящо" : "Възходящо")">
+                        @(isDescending ? "▼" : "▲")
+                    </button>
+                    <select class="form-select-sm" style="min-width: 80px;" @onchange="OnPageSizeChanged">
+                        <option value="6">6</option>
+                        <option value="9" selected>9</option>
+                        <option value="12">12</option>
+                        <option value="18">18</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="filter-buttons">
+                <button class="btn-sm btn-primary" @onclick="ApplyFiltersAsync">🔍 Филтрирай</button>
+                <button class="btn-sm btn-secondary" @onclick="ClearFiltersAsync">🧹 Изчисти</button>
+            </div>
+        </div>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="loading-status">
+            <div class="spinner"></div>
+            <span>Зареждане на дневника с хранения...</span>
+        </div>
+    }
+    else if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert">@errorMessage</div>
+    }
+    else if (mealsList.Count == 0)
+    {
+        <div class="table-responsive" style="border: none;">
+            <div class="text-empty">Няма намерени хранения за избрания период или критерии.</div>
+        </div>
+    }
+    else
+    {
+        <div class="meals-grid-3">
+            @foreach (var meal in mealsList)
+            {
+                <div class="meal-balloon-card">
+                    <div class="meal-balloon-header">
+                        <div class="meal-title-block">
+                            <h3>@meal.Name</h3>
+                            <span class="meal-date">📅 @meal.CreatedAt.ToString("dd.MM.yyyy HH:mm")</span>
+                        </div>
+                        <div class="meal-summary-badge">
+                            <span class="gi-badge gi-high text-calories">@meal.TotalCalories.ToString("F0") kcal</span>
+                            <span class="gi-badge gi-low text-carbs">@meal.TotalCarb.ToString("F1")g Въгл.</span>
+                        </div>
+                    </div>
+
+                    <div class="meal-foods-section">
+                        @if (meal.FoodsLoading)
+                        {
+                            <span class="food-loading-text">Зареждане на храните...</span>
+                        }
+                        else if (meal.Foods == null || meal.Foods.Count == 0)
+                        {
+                            <span class="no-foods-text">Няма добавени храни.</span>
+                        }
+                        else
+                        {
+                            <ul class="meal-foods-list">
+                                @foreach (var foodEntry in meal.Foods)
+                                {
+                                    <li>
+                                        <span class="food-item-name">🔸 @foodEntry.FoodName</span>
+                                        <span class="food-item-weight">@foodEntry.Weight.ToString("F0")г (@foodEntry.Calories.ToString("F0") kcal)</span>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    </div>
+
+                    <div class="meal-card-actions">
+                        <button class="btn-balloon-action view" @onclick="() => NavigationToDetails(meal.Id)">🔍 Детайли</button>
+                        <button class="btn-balloon-action delete" @onclick="() => DeleteMealAsync(meal.Id)">🗑️ Изтрий</button>
+                    </div>
+                </div>
+            }
+        </div>
+
+        <div class="pagination-footer">
+            <div class="pagination-info">
+                Страница <strong>@pageNumber</strong> от <strong>@totalPages</strong> (Общо: @totalCount)
+            </div>
+            <div class="pagination-buttons">
+                <button class="btn-page" disabled="@(!hasPreviousPage)" @onclick="PreviousPageAsync">◀ Предишна</button>
+                <span class="page-indicator">@pageNumber / @totalPages</span>
+                <button class="btn-page" disabled="@(!hasNextPage)" @onclick="NextPageAsync">Следваща ▶</button>
+            </div>
+        </div>
+    }
+</div>
+
+@if (isCreateModalOpen)
+{
+    <div class="custom-modal-backdrop">
+        <div class="custom-modal-card">
+            <h3>🍽️ Създаване на ново хранене</h3>
+            <p style="color: #7f8c8d; font-size: 13px; margin-bottom: 15px;">Въведете наименование (напр. Обяд, Следобедна закуска)</p>
+
+            @if (!string.IsNullOrEmpty(modalErrorMessage))
+            {
+                <div class="alert" style="margin-bottom: 15px;">@modalErrorMessage</div>
+            }
+
+            <div class="filter-item" style="margin-bottom: 20px;">
+                <label style="margin-bottom: 4px; display:block;">Име на храненето*</label>
+                <input type="text" class="form-control-sm" @bind="newMealName" placeholder="Минимум 3 символа..." />
+            </div>
+
+            <div class="admin-actions" style="justify-content: flex-end; gap: 8px;">
+                <button class="btn-sm btn-primary" @onclick="CreateMealAsync" disabled="@isSaving">
+                    @(isSaving ? "Запазване..." : "💾 Създай")
+                </button>
+                <button class="btn-sm btn-secondary" @onclick="CloseCreateMealModal">Отказ</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    public class MealVM
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public double TotalCarb { get; set; }
+        public double TotalProtein { get; set; }
+        public double TotalFat { get; set; }
+        public double TotalCalories { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public List<FoodEntryItemVM> Foods { get; set; } = new();
+        public bool FoodsLoading { get; set; } = true;
+    }
+
+    public class FoodEntryItemVM
+    {
+        public int Id { get; set; }
+        public string FoodName { get; set; } = "Зареждане...";
+        public double Weight { get; set; }
+        public double Calories { get; set; }
+    }
+
+    private List<MealVM> mealsList = new();
+    private int currentUserId = 0;
+
+    private int pageNumber = 1;
+    private int pageSize = 9;
+    private int totalCount = 0;
+    private int totalPages = 1;
+    private bool hasPreviousPage => pageNumber > 1;
+    private bool hasNextPage => pageNumber < totalPages;
+
+    private string filterName = string.Empty;
+    private DateTime? filterFromDate;
+    private DateTime? filterToDate;
+
+    private string sortBy = "CreatedAt";
+    private bool isDescending = true;
+
+    private bool isLoading = true;
+    private string errorMessage = string.Empty;
+
+    private bool isCreateModalOpen = false;
+    private string newMealName = string.Empty;
+    private bool isSaving = false;
+    private string modalErrorMessage = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ExtractUserIdFromTokenAsync();
+        await LoadMealsAsync();
+    }
+
+    private async Task LoadMealsAsync()
+    {
+        isLoading = true;
+        errorMessage = string.Empty;
+
+        try
+        {
+            var token = await JS.InvokeAsync<string>("localStorage.getItem", "authToken");
+            var urlBuilder = new StringBuilder($"api/MealEntries?PageNumber={pageNumber}&PageSize={pageSize}&Filters.CurrentUserId={currentUserId}");
+
+            if (!string.IsNullOrWhiteSpace(filterName))
+                urlBuilder.Append($"&Filters.Name={Uri.EscapeDataString(filterName)}");
+
+            if (filterFromDate.HasValue)
+                urlBuilder.Append($"&Filters.FromDate={filterFromDate.Value.ToString("yyyy-MM-ddTHH:mm:ss")}");
+
+            if (filterToDate.HasValue)
+                urlBuilder.Append($"&Filters.ToDate={filterToDate.Value.ToString("yyyy-MM-ddTHH:mm:ss")}");
+
+            if (!string.IsNullOrEmpty(sortBy))
+                urlBuilder.Append($"&SortBy={Uri.EscapeDataString(sortBy)}");
+            urlBuilder.Append($"&IsDescending={isDescending.ToString().ToLower()}");
+
+            var request = new HttpRequestMessage(HttpMethod.Get, urlBuilder.ToString());
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+            var response = await Http.SendAsync(request);
+            if (response.IsSuccessStatusCode)
+            {
+                var jsonString = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(jsonString);
+                var root = doc.RootElement;
+
+                totalCount = root.TryGetProperty("totalCount", out var tc) ? tc.GetInt32() : 0;
+                totalPages = root.TryGetProperty("totalPages", out var tp) ? tp.GetInt32() : 1;
+
+                mealsList.Clear();
+                if (root.TryGetProperty("items", out var itemsProp) && itemsProp.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in itemsProp.EnumerateArray())
+                    {
+                        string? createdAtRaw = null;
+                        if (item.TryGetProperty("createdAt", out var createdAtProp))
+                        {
+                            if (createdAtProp.ValueKind == JsonValueKind.String)
+                                createdAtRaw = createdAtProp.GetString();
+                            else
+                                createdAtRaw = createdAtProp.ToString();
+                        }
+
+                        DateTime createdAt = DateTime.Now;
+                        if (!string.IsNullOrEmpty(createdAtRaw))
+                        {
+                            if (DateTimeOffset.TryParse(createdAtRaw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var dtoParsed))
+                            {
+                                createdAt = dtoParsed.ToLocalTime().DateTime;
+                            }
+                            else if (DateTime.TryParse(createdAtRaw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var dtParsed))
+                            {
+                                createdAt = dtParsed.ToLocalTime();
+                            }
+                        }
+
+                        var meal = new MealVM
+                        {
+                            Id = item.TryGetProperty("id", out var id) ? id.GetInt32() : 0,
+                            Name = item.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "",
+                            TotalCarb = item.TryGetProperty("totalCarb", out var totalCarbProp) ? totalCarbProp.GetDouble() : 0,
+                            TotalProtein = item.TryGetProperty("totalProtein", out var totalProteinProp) ? totalProteinProp.GetDouble() : 0,
+                            TotalFat = item.TryGetProperty("totalFat", out var totalFatProp) ? totalFatProp.GetDouble() : 0,
+                            TotalCalories = item.TryGetProperty("totalCalories", out var totalCaloriesProp) ? totalCaloriesProp.GetDouble() : 0,
+                            CreatedAt = createdAt
+                        };
+                        mealsList.Add(meal);
+                    }
+                }
+
+                isLoading = false;
+                StateHasChanged();
+
+                _ = LoadFoodEntriesForMealsAsync(token);
+            }
+            else
+            {
+                errorMessage = "Грешка при зареждане на списъка с хранения.";
+                isLoading = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+            isLoading = false;
+        }
+    }
+
+    private async Task LoadFoodEntriesForMealsAsync(string token)
+    {
+        foreach (var meal in mealsList)
+        {
+            try
+            {
+                var foodRequestUrl = $"api/FoodEntries?PageSize=100&Filters.MealEntryId={meal.Id}";
+                var request = new HttpRequestMessage(HttpMethod.Get, foodRequestUrl);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+                var response = await Http.SendAsync(request);
+                if (response.IsSuccessStatusCode)
+                {
+                    var jsonString = await response.Content.ReadAsStringAsync();
+                    using var doc = JsonDocument.Parse(jsonString);
+                    var root = doc.RootElement;
+
+                    var foodsList = new List<FoodEntryItemVM>();
+                    if (root.TryGetProperty("items", out var itemsProp) && itemsProp.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var entry in itemsProp.EnumerateArray())
+                        {
+                            var foodId = entry.TryGetProperty("foodId", out var fId) ? fId.GetInt32() : 0;
+                            var itemVM = new FoodEntryItemVM
+                            {
+                                Id = entry.TryGetProperty("id", out var id) ? id.GetInt32() : 0,
+                                Weight = entry.TryGetProperty("weigth", out var w) ? w.GetDouble() : 0,
+                                Calories = entry.TryGetProperty("calories", out var cal) ? cal.GetDouble() : 0
+                            };
+
+                            itemVM.FoodName = await FetchFoodNameAsync(foodId, token);
+                            foodsList.Add(itemVM);
+                        }
+                    }
+
+                    meal.Foods = foodsList;
+                }
+            }
+            catch { }
+            finally
+            {
+                meal.FoodsLoading = false;
+                StateHasChanged();
+            }
+        }
+    }
+
+    private async Task<string> FetchFoodNameAsync(int foodId, string token)
+    {
+        try
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, $"api/Foods/{foodId}");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            var response = await Http.SendAsync(request);
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("name", out var nameProp))
+                {
+                    return nameProp.GetString() ?? "Неизвестна храна";
+                }
+            }
+        }
+        catch { }
+        return $"Храна #{foodId}";
+    }
+
+    private async Task CreateMealAsync()
+    {
+        if (string.IsNullOrWhiteSpace(newMealName))
+        {
+            modalErrorMessage = "Името на храненето е задължително.";
+            return;
+        }
+        if (newMealName.Length < 3)
+        {
+            modalErrorMessage = "Името на храненето трябва да съдържа поне 3 символа.";
+            return;
+        }
+        if (newMealName.Length > 100)
+        {
+            modalErrorMessage = "Името на храненето не може да бъде по-дълго от 100 символа.";
+            return;
+        }
+
+        isSaving = true;
+        modalErrorMessage = string.Empty;
+
+        try
+        {
+            var token = await JS.InvokeAsync<string>("localStorage.getItem", "authToken");
+
+            var newMealPayload = new { name = newMealName, userId = currentUserId, createdAt = DateTimeOffset.UtcNow };
+
+            var request = new HttpRequestMessage(HttpMethod.Post, "api/MealEntries");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            request.Content = new StringContent(JsonSerializer.Serialize(newMealPayload), Encoding.UTF8, "application/json");
+
+            var response = await Http.SendAsync(request);
+            if (response.IsSuccessStatusCode)
+            {
+                var jsonString = await response.Content.ReadAsStringAsync();
+                int newMealId = 0;
+
+                if (!string.IsNullOrWhiteSpace(jsonString))
+                {
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(jsonString);
+                        if (doc.RootElement.TryGetProperty("id", out var idProp))
+                        {
+                            newMealId = idProp.GetInt32();
+                        }
+                    }
+                    catch (JsonException)
+                    {
+                    }
+                }
+
+                CloseCreateMealModal();
+
+                if (newMealId > 0)
+                {
+                    Navigation.NavigateTo($"/meals/details/{newMealId}");
+                }
+                else
+                {
+                    pageNumber = 1;
+                    await LoadMealsAsync();
+                }
+            }
+            else
+            {
+                modalErrorMessage = "Неуспешен запис на храненето в базата.";
+            }
+        }
+        catch (Exception ex)
+        {
+            modalErrorMessage = ex.Message;
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    private async Task DeleteMealAsync(int id)
+    {
+        bool confirmed = await JS.InvokeAsync<bool>("confirm", "Сигурни ли сте, че искате да изтриете това хранене и всички асоциирани продукти към него?");
+        if (!confirmed) return;
+
+        try
+        {
+            var token = await JS.InvokeAsync<string>("localStorage.getItem", "authToken");
+            var request = new HttpRequestMessage(HttpMethod.Delete, $"api/MealEntries/{id}");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+            var response = await Http.SendAsync(request);
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadMealsAsync();
+            }
+            else
+            {
+                errorMessage = "Възникна грешка при опит за изтриване.";
+            }
+        }
+        catch (Exception ex) { errorMessage = ex.Message; }
+    }
+
+    private void NavigationToDetails(int mealId) => Navigation.NavigateTo($"/meals/details/{mealId}");
+    private void OpenCreateMealModal() { isCreateModalOpen = true; newMealName = string.Empty; modalErrorMessage = string.Empty; }
+    private void CloseCreateMealModal() => isCreateModalOpen = false;
+
+    private async Task ApplyFiltersAsync() { pageNumber = 1; await LoadMealsAsync(); }
+    private async Task ClearFiltersAsync() { filterName = string.Empty; filterFromDate = null; filterToDate = null; pageNumber = 1; sortBy = "CreatedAt"; isDescending = true; pageSize = 9; await LoadMealsAsync(); }
+
+    private async Task PreviousPageAsync() { if (hasPreviousPage) { pageNumber--; await LoadMealsAsync(); } }
+    private async Task NextPageAsync() { if (hasNextPage) { pageNumber++; await LoadMealsAsync(); } }
+
+    private async Task ExtractUserIdFromTokenAsync()
+    {
+        try
+        {
+            var token = await JS.InvokeAsync<string>("localStorage.getItem", "authToken");
+            if (string.IsNullOrEmpty(token)) return;
+            var chunks = token.Split('.');
+            if (chunks.Length > 1)
+            {
+                var base64 = chunks[1].Replace('-', '+').Replace('_', '/');
+                switch (base64.Length % 4)
+                {
+                    case 2: base64 += "=="; break;
+                    case 3: base64 += "="; break;
+                }
+                var bytes = Convert.FromBase64String(base64);
+                using var jwtDoc = JsonDocument.Parse(bytes);
+                var root = jwtDoc.RootElement;
+                if (root.TryGetProperty("nameid", out var idProp)) int.TryParse(idProp.GetString(), out currentUserId);
+                else if (root.TryGetProperty("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier", out var longIdProp)) int.TryParse(longIdProp.GetString(), out currentUserId);
+            }
+        }
+        catch { }
+    }
+
+    private async Task ToggleSortDirection()
+    {
+        isDescending = !isDescending;
+        await LoadMealsAsync();
+    }
+
+    private async Task OnPageSizeChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var newSize))
+        {
+            pageSize = newSize;
+            pageNumber = 1;
+            await LoadMealsAsync();
+        }
+    }
+}
+
+<style>
+    .meals-container {
+        max-width: 1250px;
+        margin: 0 auto;
+        font-family: 'Segoe UI', system-ui, sans-serif;
+        padding: 5px;
+    }
+
+    .page-header-inline {
+        display: flex;
+        align-items: center;
+        margin-bottom: 15px;
+        padding-bottom: 5px;
+        border-bottom: 1px solid #eef2f5;
+        position: relative;
+    }
+
+        .page-header-inline h2 {
+            margin: 0;
+            font-size: 20px;
+            color: #2c3e50;
+            font-weight: 600;
+        }
+
+    .header-divider {
+        margin: 0 12px;
+        color: #b2bec3;
+        font-weight: 300;
+        font-size: 16px;
+    }
+
+    .page-header-inline p {
+        margin: 0;
+        color: #7f8c8d;
+        font-size: 13px;
+    }
+
+    .btn-add-food {
+        margin-left: auto;
+        background: #2ecc71;
+        color: white;
+        padding: 6px 14px;
+        border-radius: 6px;
+        font-weight: 600;
+        border: none;
+        cursor: pointer;
+        font-size: 13px;
+    }
+
+        .btn-add-food:hover {
+            background: #27ae60;
+        }
+
+    .filter-panel-compact {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        padding: 10px 14px;
+        border-radius: 8px;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.01);
+        margin-bottom: 15px;
+    }
+
+    .filter-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: flex-end;
+    }
+
+    .filter-item {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        flex: 1;
+        min-width: 140px;
+    }
+
+    .filter-grid label {
+        font-size: 11px;
+        font-weight: 600;
+        color: #64748b;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+    }
+
+    .form-control-sm {
+        padding: 6px 10px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        font-size: 13px;
+        outline: none;
+        width: 100%;
+        box-sizing: border-box;
+        background: white;
+    }
+
+        .form-control-sm:focus {
+            border-color: #3b82f6;
+        }
+
+    .form-select-sm {
+        padding: 6px 10px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        font-size: 13px;
+        outline: none;
+        width: 100%;
+        box-sizing: border-box;
+        background: white;
+        -webkit-appearance: none;
+        -moz-appearance: none;
+        appearance: none;
+    }
+
+        .form-select-sm:focus {
+            border-color: #3b82f6;
+        }
+
+        .form-select-sm::after {
+            content: '▼';
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            pointer-events: none;
+            font-size: 12px;
+            color: #64748b;
+        }
+
+    .filter-buttons {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 1px;
+    }
+
+    .btn-sm {
+        padding: 7px 14px;
+        border: none;
+        border-radius: 6px;
+        font-weight: 600;
+        font-size: 13px;
+        cursor: pointer;
+        transition: background 0.15s;
+        white-space: nowrap;
+    }
+
+    .btn-primary {
+        background: #3b82f6;
+        color: white;
+    }
+
+        .btn-primary:hover {
+            background: #2563eb;
+        }
+
+    .btn-secondary {
+        background: #f1f5f9;
+        color: #475569;
+        border: 1px solid #cbd5e1;
+    }
+
+        .btn-secondary:hover {
+            background: #e2e8f0;
+        }
+
+    .meals-grid-3 {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 15px;
+        margin-bottom: 15px;
+    }
+
+
+    .meal-balloon-card {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 14px;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.01);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: flex-start;
+        text-align: left;
+        position: relative;
+        min-height: 200px;
+    }
+
+        .meal-balloon-card:hover {
+            background: #fafbfc;
+            border-color: #cbd5e1;
+        }
+
+    .meal-balloon-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        border-bottom: 1px solid #f1f5f9;
+        padding-bottom: 8px;
+        margin-bottom: 8px;
+    }
+
+    .meal-title-block h3 {
+        margin: 0;
+        font-size: 14.5px;
+        color: #1e293b;
+        font-weight: 600;
+    }
+
+    .meal-date {
+        font-size: 11.5px;
+        color: #7f8c8d;
+        display: block;
+        margin-top: 2px;
+    }
+
+    .meal-summary-badge {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 4px;
+    }
+
+    .gi-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: 700;
+        text-align: center;
+        white-space: nowrap;
+    }
+
+    .gi-low {
+        background: #ecfdf5;
+    }
+
+    .gi-high {
+        background: #fffbeb;
+    }
+
+    .text-carbs {
+        color: #065f46;
+    }
+
+    .text-calories {
+        color: #92400e;
+    }
+
+    .meal-foods-section {
+        flex-grow: 1;
+        margin-bottom: 8px;
+    }
+
+    .food-loading-text, .no-foods-text {
+        font-size: 12px;
+        color: #94a3b8;
+        font-style: italic;
+    }
+
+    .meal-foods-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        max-height: 95px;
+        overflow-y: auto;
+    }
+
+        .meal-foods-list li {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12.5px;
+            color: #334155;
+            border-bottom: 1px dashed #f1f5f9;
+            padding-bottom: 3px;
+        }
+
+    .food-item-name {
+        font-weight: 600;
+        color: #475569;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 150px;
+    }
+
+    .food-item-weight {
+        color: #64748b;
+        font-size: 11.5px;
+    }
+
+    .meal-card-actions {
+        display: flex;
+        gap: 6px;
+        margin-top: 8px;
+        border-top: 1px solid #f1f5f9;
+        padding-top: 8px;
+    }
+
+    .btn-balloon-action {
+        background: #f8fafc;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        padding: 4px 10px;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 600;
+        transition: all 0.2s;
+    }
+
+        .btn-balloon-action.view {
+            flex-grow: 1;
+            color: #334155;
+        }
+
+        .btn-balloon-action:hover.view {
+            background: #e0f2fe;
+            border-color: #7dd3fc;
+        }
+
+        .btn-balloon-action.delete:hover {
+            background: #fee2e2;
+            border-color: #fca5a5;
+        }
+
+    .pagination-footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 15px;
+        padding: 0 5px;
+    }
+
+    .pagination-info {
+        font-size: 13px;
+        color: #64748b;
+    }
+
+    .pagination-buttons {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-left: auto;
+    }
+
+    .page-indicator {
+        font-size: 12px;
+        color: #475569;
+    }
+
+    .btn-page {
+        background: #ffffff;
+        border: 1px solid #cbd5e1;
+        padding: 6px 12px;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 600;
+        color: #334155;
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+
+        .btn-page:hover:not(:disabled) {
+            background: #f8fafc;
+            border-color: #94a3b8;
+        }
+
+        .btn-page:disabled {
+            background: #f1f5f9;
+            color: #cbd5e1;
+            border-color: #e2e8f0;
+            cursor: not-allowed;
+        }
+
+    .loading-status {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        padding: 40px;
+        color: #64748b;
+    }
+
+    .spinner {
+        border: 2.5px solid #f3f3f3;
+        border-top: 2.5px solid #3b82f6;
+        border-radius: 50%;
+        width: 20px;
+        height: 20px;
+        animation: spin 0.8s linear infinite;
+    }
+
+    @@keyframes spin {
+        0% {
+            transform: rotate(0deg);
+        }
+
+        100% {
+            transform: rotate(360deg);
+        }
+    }
+
+    .text-empty {
+        text-align: center;
+        color: #94a3b8;
+        padding: 30px !important;
+        font-style: italic;
+    }
+
+    .alert {
+        padding: 12px;
+        background: #f8d7da;
+        color: #721c24;
+        border-radius: 6px;
+        text-align: center;
+        font-size: 13.5px;
+    }
+
+    .custom-modal-backdrop {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background: rgba(0, 0, 0, 0.4);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 999;
+    }
+
+    .custom-modal-card {
+        background: white;
+        border-radius: 8px;
+        padding: 20px;
+        width: 100%;
+        max-width: 380px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        border: 1px solid #cbd5e1;
+    }
+
+        .custom-modal-card h3 {
+            margin: 0 0 6px 0;
+            font-size: 17px;
+            color: #2c3e50;
+            font-weight: 600;
+        }
+
+    .range-inputs {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+    }
+
+    .filter-item.width-auto .form-select-sm {
+        width: auto;
+        min-width: 80px;
+    }
+
+    .btn-direction {
+        padding: 6px 10px;
+        font-size: 11px;
+    }
+</style>

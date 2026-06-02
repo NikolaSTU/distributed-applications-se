@@ -1,0 +1,309 @@
+﻿@page "/"
+@using Application.DTOs.User
+@inject HttpClient Http
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+<div class="login-container">
+    <div class="login-card">
+        @if (isLoginMode)
+        {
+            <h2>Вход в Diabetes Manager</h2>
+            <p class="subtitle">Въведете вашите данни</p>
+
+            <EditForm Model="@loginModel" OnValidSubmit="HandleLogin">
+                <div class="form-group">
+                    <label>Потребителско име</label>
+                    <InputText @bind-Value="loginModel.Username" class="form-control" placeholder="Потребителско име" />
+                </div>
+
+                <div class="form-group">
+                    <label>Парола</label>
+                    <InputText type="password" @bind-Value="loginModel.Password" class="form-control" placeholder="******" />
+                </div>
+
+                @if (!string.IsNullOrEmpty(errorMessage))
+                {
+                    <div class="alert alert-danger">@errorMessage</div>
+                }
+
+                <button type="submit" class="btn-submit" disabled="@isSubmitting">
+                    @(isSubmitting ? "Зареждане..." : "Влез в профила")
+                </button>
+            </EditForm>
+
+            <div class="switch-mode">
+                Нямате профил? <a href="javascript:void(0)" @onclick="ToggleMode">Регистрирайте се тук</a>
+            </div>
+        }
+        else
+        {
+            <h2>Регистрация</h2>
+            <p class="subtitle">Създайте нов профил</p>
+
+            <EditForm Model="@registerModel" OnValidSubmit="HandleRegister">
+                <div class="form-group">
+                    <label>Потребителско име</label>
+                    <InputText @bind-Value="registerModel.Username" class="form-control" placeholder="Потребителско име" />
+                </div>
+
+                <div class="form-group">
+                    <label>Парола</label>
+                    <InputText type="password" @bind-Value="registerModel.Password" class="form-control" placeholder="******" />
+                </div>
+
+                <div class="form-group">
+                    <label>Повтори парола</label>
+                    <input type="password" @bind-value="confirmPassword" class="form-control" placeholder="******" required />
+                </div>
+
+                @if (!string.IsNullOrEmpty(errorMessage))
+                {
+                    <div class="alert alert-danger">@errorMessage</div>
+                }
+                @if (!string.IsNullOrEmpty(successMessage))
+                {
+                    <div class="alert alert-success">@successMessage</div>
+                }
+
+                <button type="submit" class="btn-submit btn-register" disabled="@isSubmitting">
+                    @(isSubmitting ? "Регистриране..." : "Създай профил")
+                </button>
+            </EditForm>
+
+            <div class="switch-mode">
+                Вече имате профил? <a href="javascript:void(0)" @onclick="ToggleMode">Влезте оттук</a>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private bool isLoginMode = true;
+    private bool isSubmitting = false;
+    private string errorMessage = string.Empty;
+    private string successMessage = string.Empty;
+    private string confirmPassword = string.Empty;
+
+    private UserLoginDTO loginModel = new UserLoginDTO();
+    private UserRegisterDTO registerModel = new UserRegisterDTO();
+
+    private void ToggleMode()
+    {
+        isLoginMode = !isLoginMode;
+        errorMessage = string.Empty;
+        successMessage = string.Empty;
+        confirmPassword = string.Empty;
+    }
+
+    private bool ValidateRegister()
+    {
+        if (string.IsNullOrWhiteSpace(registerModel.Username))
+        {
+            errorMessage = "Потребителското име е задължително.";
+            return false;
+        }
+        if (registerModel.Username.Length < 3)
+        {
+            errorMessage = "Потребителското име трябва да съдържа поне 3 символа.";
+            return false;
+        }
+        if (registerModel.Username.Length > 50)
+        {
+            errorMessage = "Потребителското име не може да бъде по-дълго от 50 символа.";
+            return false;
+        }
+        if (!System.Text.RegularExpressions.Regex.IsMatch(registerModel.Username, @"^[a-zA-Z0-9_\.]+$"))
+        {
+            errorMessage = "Потребителското име може да съдържа само букви, цифри, долна черта (_) и точка (.)";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(registerModel.Password))
+        {
+            errorMessage = "Паролата е задължителна.";
+            return false;
+        }
+        if (registerModel.Password.Length < 6)
+        {
+            errorMessage = "Паролата трябва да бъде поне 6 символа.";
+            return false;
+        }
+        if (registerModel.Password.Length > 100)
+        {
+            errorMessage = "Паролата е прекалено дълга.";
+            return false;
+        }
+        if (!registerModel.Password.Any(char.IsUpper))
+        {
+            errorMessage = "Паролата трябва да съдържа поне една главна буква.";
+            return false;
+        }
+        if (!registerModel.Password.Any(char.IsLower))
+        {
+            errorMessage = "Паролата трябва да съдържа поне една малка буква.";
+            return false;
+        }
+        if (!registerModel.Password.Any(char.IsDigit))
+        {
+            errorMessage = "Паролата трябва да съдържа поне една цифра.";
+            return false;
+        }
+
+        if (registerModel.Password != confirmPassword)
+        {
+            errorMessage = "Паролите не съвпадат!";
+            return false;
+        }
+
+        return true;
+    }
+
+    private bool ValidateLogin()
+    {
+        if (string.IsNullOrWhiteSpace(loginModel.Username))
+        {
+            errorMessage = "Потребителското име е задължително.";
+            return false;
+        }
+        if (string.IsNullOrWhiteSpace(loginModel.Password))
+        {
+            errorMessage = "Паролата е задължителна.";
+            return false;
+        }
+        return true;
+    }
+
+    private async Task HandleLogin()
+    {
+        errorMessage = string.Empty;
+
+        if (!ValidateLogin()) return;
+
+        isSubmitting = true;
+        try
+        {
+            var response = await Http.PostAsJsonAsync("api/Auth/login", loginModel);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<Dictionary<string, string>>();
+                if (result != null && result.ContainsKey("token"))
+                {
+                    var token = result["token"];
+
+                    await JS.InvokeVoidAsync("localStorage.setItem", "authToken", token);
+
+                    var userId = ExtractUserIdFromJwt(token);
+
+                    if (!string.IsNullOrEmpty(userId))
+                    {
+                        await JS.InvokeVoidAsync("localStorage.setItem", "currentUserId", userId);
+                    }
+
+                    Navigation.NavigateTo("/dashboard", forceLoad: true);
+                }
+            }
+            else
+            {
+                errorMessage = "Грешно потребителско име или парола.";
+            }
+        }
+        catch
+        {
+            errorMessage = "Грешка при връзка с API-то. Проверете дали бекендът работи.";
+        }
+        finally { isSubmitting = false; }
+    }
+
+    private string ExtractUserIdFromJwt(string jwtToken)
+    {
+        try
+        {
+            var parts = jwtToken.Split('.');
+            if (parts.Length < 2) return string.Empty;
+
+
+            var payload = parts[1];
+
+            payload = payload.Replace('-', '+').Replace('_', '/');
+            switch (payload.Length % 4)
+            {
+                case 2: payload += "=="; break;
+                case 3: payload += "="; break;
+            }
+
+            var bytes = Convert.FromBase64String(payload);
+            var jsonBytes = System.Text.Encoding.UTF8.GetString(bytes);
+
+            using var doc = System.Text.Json.JsonDocument.Parse(jsonBytes);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("nameid", out var nameIdProp)) return nameIdProp.GetString() ?? string.Empty;
+            if (root.TryGetProperty("sub", out var subProp)) return subProp.GetString() ?? string.Empty;
+            if (root.TryGetProperty("id", out var idProp)) return idProp.GetString() ?? string.Empty;
+
+            if (root.TryGetProperty("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier", out var claimProp))
+                return claimProp.GetString() ?? string.Empty;
+
+            return string.Empty;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private async Task HandleRegister()
+    {
+        errorMessage = string.Empty;
+        successMessage = string.Empty;
+
+        if (!ValidateRegister()) return;
+
+        isSubmitting = true;
+        try
+        {
+            var response = await Http.PostAsJsonAsync("api/Auth/register", registerModel);
+
+            if (response.IsSuccessStatusCode)
+            {
+                successMessage = "Регистрацията е успешна! Вече можете да влезете.";
+                await Task.Delay(1500);
+                isLoginMode = true;
+                loginModel.Username = registerModel.Username;
+            }
+            else
+            {
+                errorMessage = "Неуспешна регистрация. Потребителското име може да е заето.";
+            }
+        }
+        catch
+        {
+            errorMessage = "Няма връзка с бекенд сървъра.";
+        }
+        finally { isSubmitting = false; }
+    }
+}
+
+<style>
+    .login-container { display: flex; justify-content: center; align-items: center; min-height: 80vh; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    .login-card { background: #ffffff; padding: 35px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); width: 100%; max-width: 400px; border: 1px solid #eef2f5; }
+    h2 { margin-bottom: 5px; color: #2c3e50; text-align: center; font-weight: 600; }
+    .subtitle { font-size: 14px; color: #7f8c8d; text-align: center; margin-bottom: 25px; }
+    .form-group { margin-bottom: 18px; }
+    label { display: block; margin-bottom: 6px; font-weight: 500; color: #34495e; font-size: 14px; }
+    .form-control { width: 100%; padding: 10px 14px; border: 1px solid #dcdde1; border-radius: 6px; box-sizing: border-box; font-size: 15px; transition: border 0.2s; }
+    .form-control:focus { border-color: #3498db; outline: none; }
+    .btn-submit { width: 100%; padding: 12px; background: #3498db; color: white; border: none; border-radius: 6px; font-size: 16px; font-weight: 600; cursor: pointer; margin-top: 10px; transition: background 0.2s; }
+    .btn-submit:hover { background: #2980b9; }
+    .btn-register { background: #2ecc71; }
+    .btn-register:hover { background: #27ae60; }
+    .btn-submit:disabled { background: #bdc3c7; cursor: not-allowed; }
+    .alert { padding: 12px; border-radius: 6px; margin-bottom: 15px; font-size: 14px; text-align: center; }
+    .alert-danger { background: #feadb3; color: #c0392b; }
+    .alert-success { background: #d4ch9a; color: #27ae60; }
+    .switch-mode { text-align: center; margin-top: 20px; font-size: 14px; color: #7f8c8d; }
+    .switch-mode a { color: #3498db; text-decoration: none; font-weight: 600; }
+    .switch-mode a:hover { text-decoration: underline; }
+</style>

@@ -1,0 +1,1115 @@
+﻿@page "/logbook"
+@using System.Net.Http.Headers
+@using System.Text.Json
+@using System.Web
+@using System.Text
+@inject HttpClient Http
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+<div class="logbook-container">
+    <div class="page-header-inline">
+        <h2>📊 Дневник</h2>
+        <span class="header-divider">|</span>
+        <p>Преглед и управление на вашите записи за кръвна захар и инсулин.</p>
+    </div>
+
+    <div class="tabs-header">
+        <button class="tab-button @(activeTab == "glucose" ? "active" : "")" @onclick="SwitchTabGlucose">
+            🩸 Кръвна Захар
+        </button>
+        <button class="tab-button @(activeTab == "insulin" ? "active" : "")" @onclick="SwitchTabInsulin">
+            💉 Инсулин
+        </button>
+    </div>
+
+    <div class="filter-panel-compact">
+        <div class="filter-grid-two-rows">
+            @if (activeTab == "glucose")
+            {
+                <div class="filter-row">
+                    <div class="filter-item flex-2">
+                        <label>Бележка</label>
+                        <input type="text" class="form-control-sm" placeholder="Търси в бележки..." @bind="filterGlucoseNote" />
+                    </div>
+
+                    <div class="filter-item flex-1">
+                        <label>Източник</label>
+                        <input type="text" class="form-control-sm" placeholder="Апарат, Сензор..." @bind="filterGlucoseSource" />
+                    </div>
+
+                    <div class="filter-item-range flex-1">
+                        <label>Стойност (mg/dL)</label>
+                        <div class="range-inputs">
+                            <input type="number" class="form-control-sm" placeholder="Мин" @bind="filterGlucoseMinValue" />
+                            <input type="number" class="form-control-sm" placeholder="Макс" @bind="filterGlucoseMaxValue" />
+                        </div>
+                    </div>
+                </div>
+
+                <div class="filter-row row-bottom">
+                    <div class="filter-item">
+                        <label>След (Дата)</label>
+                        <input type="date" class="form-control-sm" @bind="filterGlucoseFromDate" />
+                    </div>
+
+                    <div class="filter-item">
+                        <label>Преди (Дата)</label>
+                        <input type="date" class="form-control-sm" @bind="filterGlucoseToDate" />
+                    </div>
+
+                    <div class="filter-item width-auto">
+                        <label>Сортирай по</label>
+                        <select class="form-select-sm" @bind="sortByGlucose">
+                            <option value="Id">Най-нови първо (Id)</option>
+                            <option value="MeasuredAt">Дата/Час</option>
+                            <option value="Value">Стойност</option>
+                            <option value="Source">Източник</option>
+                        </select>
+                    </div>
+
+                    <div class="filter-item width-auto">
+                        <label>Посока / Редове</label>
+                        <div class="range-inputs">
+                            <button class="btn-sm btn-secondary btn-direction" @onclick="ToggleSortDirectionGlucose" title="@(isDescendingGlucose ? "Низходящо" : "Възходящо")">
+                                @(isDescendingGlucose ? "▼" : "▲")
+                            </button>
+                            <select class="form-select-sm" @onchange="OnPageSizeChanged">
+                                <option value="5">5</option>
+                                <option value="10" selected>10</option>
+                                <option value="20">20</option>
+                                <option value="50">50</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="filter-buttons">
+                        <button class="btn-sm btn-secondary" @onclick="ResetFilters" title="Изчисти филтри">🧹 Изчисти</button>
+                        <button class="btn-sm btn-primary" @onclick="ApplyFilters">Търси</button>
+                        <button class="btn-sm btn-success btn-add-entry" @onclick="CreateEntry">➕ Добави запис</button>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="filter-row">
+                    <div class="filter-item flex-2">
+                        <label>Тип инсулин</label>
+                        <input type="text" class="form-control-sm" placeholder="Бърз, Базален, Марка..." @bind="filterInsulinType" />
+                    </div>
+
+                    <div class="filter-item-range flex-1">
+                        <label>Единици (U)</label>
+                        <div class="range-inputs">
+                            <input type="number" step="0.1" class="form-control-sm" placeholder="Мин" @bind="filterInsulinMinUnits" />
+                            <input type="number" step="0.1" class="form-control-sm" placeholder="Макс" @bind="filterInsulinMaxUnits" />
+                        </div>
+                    </div>
+                </div>
+
+                <div class="filter-row row-bottom">
+                    <div class="filter-item">
+                        <label>След (Дата)</label>
+                        <input type="date" class="form-control-sm" @bind="filterInsulinFromDate" />
+                    </div>
+
+                    <div class="filter-item">
+                        <label>Преди (Дата)</label>
+                        <input type="date" class="form-control-sm" @bind="filterInsulinToDate" />
+                    </div>
+
+                    <div class="filter-item width-auto">
+                        <label>Сортирай по</label>
+                        <select class="form-select-sm" @bind="sortByInsulin">
+                            <option value="Id">Най-нови първо (Id)</option>
+                            <option value="InjectedAt">Дата/Час</option>
+                            <option value="Units">Единици</option>
+                            <option value="Type">Тип</option>
+                        </select>
+                    </div>
+
+                    <div class="filter-item width-auto">
+                        <label>Посока / Редове</label>
+                        <div class="range-inputs">
+                            <button class="btn-sm btn-secondary btn-direction" @onclick="ToggleSortDirectionInsulin" title="@(isDescendingInsulin ? "Низходящо" : "Възходящо")">
+                                @(isDescendingInsulin ? "▼" : "▲")
+                            </button>
+                            <select class="form-select-sm" @onchange="OnPageSizeChanged">
+                                <option value="5">5</option>
+                                <option value="10" selected>10</option>
+                                <option value="20">20</option>
+                                <option value="50">50</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="filter-buttons">
+                        <button class="btn-sm btn-secondary" @onclick="ResetFilters" title="Изчисти филтри">🧹 Изчисти</button>
+                        <button class="btn-sm btn-primary" @onclick="ApplyFilters">Търси</button>
+                        <button class="btn-sm btn-success btn-add-entry" @onclick="CreateEntry">➕ Добави запис</button>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="loading-status">
+            <div class="spinner"></div>
+            <span>@(activeTab == "glucose" ? "Зареждане на записи за кръвна захар..." : "Зареждане на записи за инсулин...")</span>
+        </div>
+    }
+    else if (!string.IsNullOrEmpty(apiError))
+    {
+        <div class="alert alert-danger">@apiError</div>
+    }
+    else if (activeTab == "glucose")
+    {
+        <div class="table-responsive">
+            <table class="logbook-table">
+                <thead>
+                    <tr>
+                        <th>Дата/Час</th>
+                        <th class="text-center">Стойност (mg/dL)</th>
+                        <th class="text-center">Източник</th>
+                        @if (isAdmin)
+                        {
+                            <th class="text-center">Потребител</th>
+                        }
+                        <th>Бележка</th>
+                        <th class="text-center">Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (glucoseList.HasValue && glucoseList.Value.GetArrayLength() > 0)
+                    {
+                        @foreach (var entry in glucoseList.Value.EnumerateArray())
+                        {
+                            var entryId = entry.TryGetProperty("id", out var idProp) ? idProp.GetInt32() : 0;
+                            var measuredAt = GetSafeDateTime(entry, "measuredAt");
+                            var value = GetSafeDouble(entry, "value");
+                            var glucoseClass = GetGlucoseClass(value);
+                            var noteText = GetSafeString(entry, "note", "-");
+                            var userId = entry.TryGetProperty("userId", out var uProp) ? uProp.GetInt32() : 0;
+
+                            <tr>
+                                <td class="entry-date">@measuredAt.ToString("dd.MM.yyyy HH:mm")</td>
+                                <td class="text-center weight-bold">
+                                    <span class="glucose-badge @glucoseClass">@value.ToString("F0") mg/dL</span>
+                                </td>
+                                <td class="text-center">@GetSafeString(entry, "source", "-")</td>
+                                @if (isAdmin)
+                                {
+                                    <td class="text-center">
+                                        <span class="badge-user">@GetUserDisplayName(userId)</span>
+                                    </td>
+                                }
+                                <td class="entry-note-cell">
+                                    <div class="truncate-note-wrapper" title="@noteText">
+                                        @noteText
+                                    </div>
+                                </td>
+                                <td class="text-center">
+                                    <div class="entry-actions">
+                                        <button class="btn-action edit" @onclick="@(() => EditEntryHandler(entryId, "glucose"))" title="Редактирай">✏️</button>
+                                        <button class="btn-action delete" @onclick="@(() => DeleteEntryHandler(entryId, "GlucoseEntries"))" title="Изтрий">🗑️</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    }
+                    else
+                    {
+                        <tr>
+                            <td colspan="@(isAdmin ? 6 : 5)" class="text-empty">Няма намерени записи.</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    else if (activeTab == "insulin")
+    {
+        <div class="table-responsive">
+            <table class="logbook-table">
+                <thead>
+                    <tr>
+                        <th>Дата/Час</th>
+                        <th class="text-center">Единици</th>
+                        <th class="text-center">Тип</th>
+                        @if (isAdmin)
+                        {
+                            <th class="text-center">Потребител</th>
+                        }
+                        <th>Бележка</th>
+                        <th class="text-center">Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (insulinList.HasValue && insulinList.Value.GetArrayLength() > 0)
+                    {
+                        @foreach (var entry in insulinList.Value.EnumerateArray())
+                        {
+                            var entryId = entry.TryGetProperty("id", out var idProp) ? idProp.GetInt32() : 0;
+                            var injectedAt = GetSafeDateTime(entry, "injectedAt");
+                            var units = GetSafeDouble(entry, "units");
+                            var noteText = GetSafeString(entry, "note", "-");
+                            var userId = entry.TryGetProperty("userId", out var uProp) ? uProp.GetInt32() : 0;
+
+                            <tr>
+                                <td class="entry-date">@injectedAt.ToString("dd.MM.yyyy HH:mm")</td>
+                                <td class="text-center weight-bold text-insulin">@units.ToString("F1") U</td>
+                                <td class="text-center">@GetSafeString(entry, "type", "-")</td>
+                                @if (isAdmin)
+                                {
+                                    <td class="text-center">
+                                        <span class="badge-user">@GetUserDisplayName(userId)</span>
+                                    </td>
+                                }
+                                <td class="entry-note-cell">
+                                    <div class="truncate-note-wrapper" title="@noteText">
+                                        @noteText
+                                    </div>
+                                </td>
+                                <td class="text-center">
+                                    <div class="entry-actions">
+                                        <button class="btn-action edit" @onclick="@(() => EditEntryHandler(entryId, "insulin"))" title="Редактирай">✏️</button>
+                                        <button class="btn-action delete" @onclick="@(() => DeleteEntryHandler(entryId, "InsulinEntries"))" title="Изтрий">🗑️</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    }
+                    else
+                    {
+                        <tr>
+                            <td colspan="@(isAdmin ? 6 : 5)" class="text-empty">Няма намерени записи.</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    @if (!isLoading && string.IsNullOrEmpty(apiError))
+    {
+        <div class="pagination-footer">
+            <div class="pagination-info">
+                Показани @((activeTab == "glucose" ? glucoseList?.GetArrayLength() : insulinList?.GetArrayLength()) ?? 0) от общо @totalCount записи
+            </div>
+            <div class="pagination-buttons">
+                <span class="page-indicator">Страница <strong>@currentPage</strong> от <strong>@totalPages</strong></span>
+                <button class="btn-page" disabled="@(!hasPreviousPage)" @onclick="GoToPreviousPage">◀ Предишна</button>
+                <button class="btn-page" disabled="@(!hasNextPage)" @onclick="GoToNextPage">Следваща ▶</button>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private string activeTab = "glucose";
+    private bool isLoading = true;
+    private string apiError = string.Empty;
+    private bool isAdmin = false;
+
+    private Dictionary<int, string> userCache = new Dictionary<int, string>();
+
+    private string filterGlucoseNote = string.Empty;
+    private string filterGlucoseSource = string.Empty;
+    private double? filterGlucoseMinValue;
+    private double? filterGlucoseMaxValue;
+    private DateTime? filterGlucoseFromDate;
+    private DateTime? filterGlucoseToDate;
+
+    private string sortByGlucose = "MeasuredAt";
+    private bool isDescendingGlucose = true;
+
+    private string filterInsulinType = string.Empty;
+    private double? filterInsulinMinUnits;
+    private double? filterInsulinMaxUnits;
+    private DateTime? filterInsulinFromDate;
+    private DateTime? filterInsulinToDate;
+
+    private string sortByInsulin = "InjectedAt";
+    private bool isDescendingInsulin = true;
+
+    private int currentPage = 1;
+    private int pageSize = 10;
+    private int totalCount = 0;
+    private int totalPages = 1;
+    private bool hasPreviousPage = false;
+    private bool hasNextPage = false;
+
+    private JsonElement? glucoseList = null;
+    private JsonElement? insulinList = null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CheckUserRoleAsync();
+        await LoadEntriesAsync();
+    }
+
+    private async Task LoadEntriesAsync()
+    {
+        isLoading = true;
+        apiError = string.Empty;
+
+        try
+        {
+            var token = await JS.InvokeAsync<string>("localStorage.getItem", "authToken");
+            var queryParams = HttpUtility.ParseQueryString(string.Empty);
+            queryParams["PageNumber"] = currentPage.ToString();
+            queryParams["PageSize"] = pageSize.ToString();
+
+            string endpoint = "";
+
+            if (activeTab == "glucose")
+            {
+                endpoint = "api/GlucoseEntries"; 
+                if (!string.IsNullOrEmpty(filterGlucoseNote)) queryParams["Filters.Note"] = filterGlucoseNote;
+                if (!string.IsNullOrEmpty(filterGlucoseSource)) queryParams["Filters.Source"] = filterGlucoseSource;
+                if (filterGlucoseMinValue.HasValue) queryParams["Filters.MinValue"] = filterGlucoseMinValue.Value.ToString();
+                if (filterGlucoseMaxValue.HasValue) queryParams["Filters.MaxValue"] = filterGlucoseMaxValue.Value.ToString();
+                if (filterGlucoseFromDate.HasValue) queryParams["Filters.FromDate"] = filterGlucoseFromDate.Value.ToString("yyyy-MM-ddTHH:mm:ss");
+                if (filterGlucoseToDate.HasValue) queryParams["Filters.ToDate"] = filterGlucoseToDate.Value.ToString("yyyy-MM-ddTHH:mm:ss");
+
+                if (!string.IsNullOrEmpty(sortByGlucose)) queryParams["SortBy"] = sortByGlucose;
+                queryParams["IsDescending"] = isDescendingGlucose.ToString().ToLower();
+            }
+            else
+            {
+                endpoint = "api/InsulinEntries"; 
+                if (!string.IsNullOrEmpty(filterInsulinType)) queryParams["Filters.Type"] = filterInsulinType;
+                if (filterInsulinMinUnits.HasValue) queryParams["Filters.MinUnits"] = filterInsulinMinUnits.Value.ToString();
+                if (filterInsulinMaxUnits.HasValue) queryParams["Filters.MaxUnits"] = filterInsulinMaxUnits.Value.ToString();
+                if (filterInsulinFromDate.HasValue) queryParams["Filters.FromDate"] = filterInsulinFromDate.Value.ToString("yyyy-MM-ddTHH:mm:ss");
+                if (filterInsulinToDate.HasValue) queryParams["Filters.ToDate"] = filterInsulinToDate.Value.ToString("yyyy-MM-ddTHH:mm:ss");
+
+                if (!string.IsNullOrEmpty(sortByInsulin)) queryParams["SortBy"] = sortByInsulin;
+                queryParams["IsDescending"] = isDescendingInsulin.ToString().ToLower();
+            }
+
+            var url = $"{endpoint}?{queryParams}";
+            var request = new HttpRequestMessage(HttpMethod.Get, url);
+
+            if (!string.IsNullOrEmpty(token))
+            {
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            }
+
+            var response = await Http.SendAsync(request);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var jsonStr = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(jsonStr);
+                var root = doc.RootElement;
+
+                if (root.TryGetProperty("items", out var itemsProp))
+                {
+                    if (activeTab == "glucose")
+                    {
+                        glucoseList = itemsProp.Clone();
+                        await LoadUsernamesAsync(glucoseList);
+                    }
+                    else
+                    {
+                        insulinList = itemsProp.Clone();
+                        await LoadUsernamesAsync(insulinList);
+                    }
+                }
+
+                totalCount = root.TryGetProperty("totalCount", out var tc) ? tc.GetInt32() : 0;
+                totalPages = root.TryGetProperty("totalPages", out var tp) ? tp.GetInt32() : 1;
+                hasPreviousPage = root.TryGetProperty("hasPreviousPage", out var hp) && hp.GetBoolean();
+                hasNextPage = root.TryGetProperty("hasNextPage", out var hn) && hn.GetBoolean();
+            }
+            else
+            {
+                apiError = $"Грешка при зареждане на данните: {response.StatusCode}";
+            }
+        }
+        catch (Exception ex)
+        {
+            apiError = $"Възникна неочаквана грешка: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task LoadUsernamesAsync(JsonElement? list)
+    {
+        if (!list.HasValue || !isAdmin) return;
+
+        var uniqueUserIds = new HashSet<int>();
+        foreach (var entry in list.Value.EnumerateArray())
+        {
+            if (entry.TryGetProperty("userId", out var uProp) && uProp.ValueKind == JsonValueKind.Number)
+            {
+                int uid = uProp.GetInt32();
+                if (uid > 0 && !userCache.ContainsKey(uid))
+                {
+                    uniqueUserIds.Add(uid);
+                }
+            }
+        }
+
+        if (uniqueUserIds.Count == 0) return;
+
+        var token = await JS.InvokeAsync<string>("localStorage.getItem", "authToken");
+
+        foreach (var userId in uniqueUserIds)
+        {
+            try
+            {
+                var request = new HttpRequestMessage(HttpMethod.Get, $"api/Users/{userId}");
+                if (!string.IsNullOrEmpty(token))
+                {
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                }
+
+                var response = await Http.SendAsync(request);
+                if (response.IsSuccessStatusCode)
+                {
+                    var jsonStr = await response.Content.ReadAsStringAsync();
+                    using var doc = JsonDocument.Parse(jsonStr);
+                    var root = doc.RootElement;
+
+                    if (root.TryGetProperty("username", out var nameProp))
+                    {
+                        userCache[userId] = nameProp.GetString() ?? $"ID: {userId}";
+                    }
+                    else
+                    {
+                        userCache[userId] = $"ID: {userId}";
+                    }
+                }
+                else
+                {
+                    userCache[userId] = $"ID: {userId}";
+                }
+            }
+            catch
+            {
+                userCache[userId] = $"ID: {userId}";
+            }
+        }
+    }
+
+    private string GetUserDisplayName(int userId)
+    {
+        if (userId <= 0) return "-";
+        return userCache.ContainsKey(userId) ? userCache[userId] : $"Зареждане ({userId})...";
+    }
+
+    private async Task CheckUserRoleAsync()
+    {
+        try
+        {
+            var token = await JS.InvokeAsync<string>("localStorage.getItem", "authToken");
+            if (!string.IsNullOrEmpty(token))
+            {
+                var chunks = token.Split('.');
+                if (chunks.Length > 1)
+                {
+                    var base64 = chunks[1].Replace('-', '+').Replace('_', '/');
+                    switch (base64.Length % 4)
+                    {
+                        case 2: base64 += "=="; break;
+                        case 3: base64 += "="; break;
+                    }
+                    var jsonBytes = Convert.FromBase64String(base64);
+                    using var doc = JsonDocument.Parse(jsonBytes);
+                    var root = doc.RootElement;
+
+                    if (root.TryGetProperty("role", out var roleProp))
+                    {
+                        isAdmin = roleProp.GetString() == "Admin";
+                    }
+                    else if (root.TryGetProperty("http://schemas.microsoft.com/ws/2008/06/identity/claims/role", out var longRoleProp))
+                    {
+                        isAdmin = longRoleProp.GetString() == "Admin";
+                    }
+                }
+            }
+        }
+        catch
+        {
+            isAdmin = false;
+        }
+    }
+
+    private async Task SwitchTabGlucose()
+    {
+        if (activeTab == "glucose") return;
+        activeTab = "glucose";
+        currentPage = 1;
+        await LoadEntriesAsync();
+    }
+
+    private async Task SwitchTabInsulin()
+    {
+        if (activeTab == "insulin") return;
+        activeTab = "insulin";
+        currentPage = 1;
+        await LoadEntriesAsync();
+    }
+
+    private async Task ApplyFilters()
+    {
+        currentPage = 1;
+        await LoadEntriesAsync();
+    }
+
+    private async Task ResetFilters()
+    {
+        if (activeTab == "glucose")
+        {
+            filterGlucoseNote = string.Empty;
+            filterGlucoseSource = string.Empty;
+            filterGlucoseMinValue = null;
+            filterGlucoseMaxValue = null;
+            filterGlucoseFromDate = null;
+            filterGlucoseToDate = null;
+            sortByGlucose = "MeasuredAt";
+            isDescendingGlucose = true;
+        }
+        else
+        {
+            filterInsulinType = string.Empty;
+            filterInsulinMinUnits = null;
+            filterInsulinMaxUnits = null;
+            filterInsulinFromDate = null;
+            filterInsulinToDate = null;
+            sortByInsulin = "InjectedAt";
+            isDescendingInsulin = true;
+        }
+        currentPage = 1;
+        await LoadEntriesAsync();
+    }
+
+    private async Task OnPageSizeChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var newSize))
+        {
+            pageSize = newSize;
+            currentPage = 1;
+            await LoadEntriesAsync();
+        }
+    }
+
+    private async Task GoToPreviousPage()
+    {
+        if (hasPreviousPage)
+        {
+            currentPage--;
+            await LoadEntriesAsync();
+        }
+    }
+
+    private async Task GoToNextPage()
+    {
+        if (hasNextPage)
+        {
+            currentPage++;
+            await LoadEntriesAsync();
+        }
+    }
+
+    private void CreateEntry() => Navigation.NavigateTo(activeTab == "glucose" ? "/logbook/create/glucose" : "/logbook/create/insulin");
+    private void EditEntryHandler(int id, string type) => Navigation.NavigateTo($"/logbook/edit/{type}/{id}");
+
+    private async Task DeleteEntryHandler(int id, string type)
+    {
+        bool confirmed = await JS.InvokeAsync<bool>("confirm", "Сигурни ли сте, че искате да изтриете този запис?");
+        if (!confirmed) return;
+
+        try
+        {
+            var token = await JS.InvokeAsync<string>("localStorage.getItem", "authToken");
+            var request = new HttpRequestMessage(HttpMethod.Delete, $"api/{type}/{id}");
+            if (!string.IsNullOrEmpty(token))
+            {
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            }
+
+            var response = await Http.SendAsync(request);
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadEntriesAsync();
+            }
+            else
+            {
+                await JS.InvokeVoidAsync("alert", "Възникна грешка при триене на записа.");
+            }
+        }
+        catch (Exception ex)
+        {
+            await JS.InvokeVoidAsync("alert", $"Грешка: {ex.Message}");
+        }
+    }
+
+    private string GetGlucoseClass(double value)
+    {
+        if (value < 70) return "glucose-low";
+        if (value > 180) return "glucose-high";
+        return "glucose-normal";
+    }
+
+    private string GetSafeString(JsonElement element, string propName, string fallback) =>
+        element.TryGetProperty(propName, out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() ?? fallback : fallback;
+
+    private double GetSafeDouble(JsonElement element, string propName) =>
+        element.TryGetProperty(propName, out var p) && p.ValueKind == JsonValueKind.Number ? p.GetDouble() : 0.0;
+
+    private DateTime GetSafeDateTime(JsonElement element, string propName) =>
+        element.TryGetProperty(propName, out var p) && p.ValueKind == JsonValueKind.String && DateTime.TryParse(p.GetString(), out var dt) ? dt : DateTime.Now;
+
+    private async Task ToggleSortDirectionGlucose()
+    {
+        isDescendingGlucose = !isDescendingGlucose;
+        await LoadEntriesAsync();
+    }
+
+    private async Task ToggleSortDirectionInsulin()
+    {
+        isDescendingInsulin = !isDescendingInsulin;
+        await LoadEntriesAsync();
+    }
+}
+
+<style>
+    .logbook-container {
+        max-width: 1250px;
+        margin: 0 auto;
+        font-family: 'Segoe UI', system-ui, sans-serif;
+        padding: 5px;
+    }
+
+    .page-header-inline {
+        display: flex;
+        align-items: center;
+        margin-bottom: 15px;
+        padding-bottom: 5px;
+        border-bottom: 1px solid #eef2f5;
+    }
+
+        .page-header-inline h2 {
+            margin: 0;
+            font-size: 20px;
+            color: #2c3e50;
+            font-weight: 600;
+        }
+
+    .header-divider {
+        margin: 0 12px;
+        color: #b2bec3;
+        font-weight: 300;
+        font-size: 16px;
+    }
+
+    .page-header-inline p {
+        margin: 0;
+        color: #7f8c8d;
+        font-size: 13px;
+    }
+
+    .tabs-header {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 15px;
+        border-bottom: 2px solid #e2e8f0;
+    }
+
+    .tab-button {
+        padding: 10px 16px;
+        background: transparent;
+        border: none;
+        border-bottom: 3px solid transparent;
+        color: #64748b;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+        font-size: 14px;
+    }
+
+        .tab-button:hover {
+            color: #334155;
+        }
+
+        .tab-button.active {
+            color: #3b82f6;
+            border-bottom-color: #3b82f6;
+        }
+
+    .filter-panel-compact {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        padding: 12px 14px;
+        border-radius: 8px;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.01);
+        margin-bottom: 15px;
+    }
+
+    .filter-grid-two-rows {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .filter-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: flex-end;
+        width: 100%;
+    }
+
+        .filter-row.row-bottom {
+            border-top: 1px dashed #f1f5f9;
+            padding-top: 10px;
+        }
+
+    .filter-item {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        flex: 1;
+        min-width: 140px;
+    }
+
+        .filter-item.width-auto {
+            flex: none;
+            min-width: 80px;
+        }
+
+    .filter-item-range {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        flex: 1.2;
+        min-width: 160px;
+    }
+
+    .flex-1 {
+        flex: 1;
+    }
+
+    .flex-2 {
+        flex: 2;
+        min-width: 220px;
+    }
+
+    .filter-row label {
+        font-size: 11px;
+        font-weight: 600;
+        color: #64748b;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+    }
+
+    .range-inputs {
+        display: flex;
+        gap: 4px;
+    }
+
+    .form-control-sm {
+        padding: 6px 10px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        font-size: 13px;
+        outline: none;
+        width: 100%;
+        box-sizing: border-box;
+        background: white;
+    }
+
+        .form-control-sm:focus {
+            border-color: #3b82f6;
+        }
+
+    .form-select-sm {
+        padding: 6px 10px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        font-size: 13px;
+        outline: none;
+        background: white;
+        cursor: pointer;
+        width: 100%;
+    }
+
+    .filter-buttons {
+        display: flex;
+        gap: 6px;
+        margin-left: auto;
+        align-items: center;
+    }
+
+    .btn-sm {
+        padding: 7px 14px;
+        border: none;
+        border-radius: 6px;
+        font-weight: 600;
+        font-size: 13px;
+        cursor: pointer;
+        transition: background 0.15s;
+        white-space: nowrap;
+    }
+
+    .btn-primary {
+        background: #3b82f6;
+        color: white;
+    }
+
+        .btn-primary:hover {
+            background: #2563eb;
+        }
+
+    .btn-secondary {
+        background: #f1f5f9;
+        color: #475569;
+        border: 1px solid #cbd5e1;
+    }
+
+        .btn-secondary:hover {
+            background: #e2e8f0;
+        }
+
+    .btn-success {
+        background: #2ecc71;
+        color: white;
+    }
+
+        .btn-success:hover {
+            background: #27ae60;
+        }
+
+    .table-responsive {
+        width: 100%;
+        overflow-x: auto;
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.01);
+    }
+
+    .logbook-table {
+        width: 100%;
+        border-collapse: collapse;
+        text-align: left;
+        font-size: 13.5px;
+    }
+
+        .logbook-table th {
+            background: #f8fafc;
+            color: #475569;
+            font-weight: 600;
+            padding: 10px 14px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+            /* Динамично преизчислени колони за по-красив изглед спрямо ролята */
+            .logbook-table th:nth-child(1), .logbook-table td:nth-child(1) {
+                width: 15%;
+            }
+
+            .logbook-table th:nth-child(2), .logbook-table td:nth-child(2) {
+                width: 15%;
+            }
+
+            .logbook-table th:nth-child(3), .logbook-table td:nth-child(3) {
+                width: 15%;
+            }
+
+        .logbook-table td {
+            padding: 10px 14px;
+            border-bottom: 1px solid #f1f5f9;
+            color: #334155;
+            vertical-align: middle;
+        }
+
+        .logbook-table tr:hover {
+            background: #fafbfc;
+        }
+
+    .entry-date {
+        font-weight: 600;
+        color: #1e293b;
+    }
+
+    .entry-note-cell {
+        vertical-align: middle !important;
+    }
+
+    .truncate-note-wrapper {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 320px;
+        color: #64748b;
+        font-size: 12px;
+        transition: all 0.25s ease;
+        cursor: pointer;
+    }
+
+        .truncate-note-wrapper:hover {
+            white-space: normal;
+            overflow: visible;
+            word-break: break-word;
+            background: #f8fafc;
+            padding: 4px;
+            border-radius: 4px;
+            color: #1e293b;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        }
+
+    .text-center {
+        text-align: center;
+    }
+
+    .weight-bold {
+        font-weight: 600;
+    }
+
+    .text-insulin {
+        color: #8b5cf6;
+    }
+
+    .text-empty {
+        text-align: center;
+        color: #94a3b8;
+        padding: 30px !important;
+        font-style: italic;
+    }
+
+    .glucose-badge {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 700;
+        min-width: 70px;
+        text-align: center;
+    }
+
+    .badge-user {
+        background-color: #e0f2fe;
+        color: #0369a1;
+        padding: 4px 8px;
+        border-radius: 6px;
+        font-size: 11.5px;
+        font-weight: 600;
+        display: inline-block;
+    }
+
+    .glucose-low {
+        background: #fee2e2;
+        color: #991b1b;
+    }
+
+    .glucose-normal {
+        background: #ecfdf5;
+        color: #065f46;
+    }
+
+    .glucose-high {
+        background: #fef3c7;
+        color: #92400e;
+    }
+
+    .entry-actions {
+        display: flex;
+        gap: 6px;
+        justify-content: center;
+    }
+
+    .btn-action {
+        background: #f8fafc;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        padding: 4px 8px;
+        cursor: pointer;
+        font-size: 14px;
+        transition: all 0.2s;
+    }
+
+        .btn-action:hover.edit {
+            background: #e0f2fe;
+            border-color: #7dd3fc;
+        }
+
+        .btn-action:hover.delete {
+            background: #fee2e2;
+            border-color: #fca5a5;
+        }
+
+    .pagination-footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 15px;
+        padding: 0 5px;
+    }
+
+    .pagination-info {
+        font-size: 13px;
+        color: #64748b;
+    }
+
+    .pagination-buttons {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-left: auto;
+    }
+
+    .page-indicator {
+        font-size: 12px;
+        color: #475569;
+    }
+
+    .btn-page {
+        background: #ffffff;
+        border: 1px solid #cbd5e1;
+        padding: 6px 12px;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 600;
+        color: #334155;
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+
+        .btn-page:hover:not(:disabled) {
+            background: #f8fafc;
+            border-color: #94a3b8;
+        }
+
+        .btn-page:disabled {
+            background: #f1f5f9;
+            color: #cbd5e1;
+            border-color: #e2e8f0;
+            cursor: not-allowed;
+        }
+
+    .loading-status {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        padding: 40px;
+        color: #64748b;
+    }
+
+    .alert {
+        padding: 12px;
+        background: #f8d7da;
+        color: #721c24;
+        border-radius: 6px;
+        text-align: center;
+    }
+</style>

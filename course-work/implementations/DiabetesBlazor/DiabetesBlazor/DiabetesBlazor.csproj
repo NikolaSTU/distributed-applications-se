@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\DiabetesAPI\Application\DTOs\FoodEntry\FoodEntryCreateUpdateDTO.cs" Link="DTOs\FoodEntry\FoodEntryCreateUpdateDTO.cs" />
+    <Compile Include="..\..\DiabetesAPI\Application\DTOs\FoodEntry\FoodEntryResponseDTO.cs" Link="DTOs\FoodEntry\FoodEntryResponseDTO.cs" />
+    <Compile Include="..\..\DiabetesAPI\Application\DTOs\Food\FoodCreateUpdateDTO.cs" Link="DTOs\Food\FoodCreateUpdateDTO.cs" />
+    <Compile Include="..\..\DiabetesAPI\Application\DTOs\Food\FoodResponseDTO.cs" Link="DTOs\Food\FoodResponseDTO.cs" />
+    <Compile Include="..\..\DiabetesAPI\Application\DTOs\GlucoseEntry\GlucoseEntryCreateUpdateDTO.cs" Link="DTOs\GlucoseEntry\GlucoseEntryCreateUpdateDTO.cs" />
+    <Compile Include="..\..\DiabetesAPI\Application\DTOs\GlucoseEntry\GlucoseEntryResponseDTO.cs" Link="DTOs\GlucoseEntry\GlucoseEntryResponseDTO.cs" />
+    <Compile Include="..\..\DiabetesAPI\Application\DTOs\InsulinEntry\InsulinEntryCreateUpdateDTO.cs" Link="DTOs\InsulinEntry\InsulinEntryCreateUpdateDTO.cs" />
+    <Compile Include="..\..\DiabetesAPI\Application\DTOs\InsulinEntry\InsulinEntryResponseDTO.cs" Link="DTOs\InsulinEntry\InsulinEntryResponseDTO.cs" />
+    <Compile Include="..\..\DiabetesAPI\Application\DTOs\MealEntry\MealEntryCreateUpdateDTO.cs" Link="DTOs\MealEntry\MealEntryCreateUpdateDTO.cs" />
+    <Compile Include="..\..\DiabetesAPI\Application\DTOs\MealEntry\MealEntryResponseDTO.cs" Link="DTOs\MealEntry\MealEntryResponseDTO.cs" />
+    <Compile Include="..\..\DiabetesAPI\Application\DTOs\Paging\BaseQueryParameters.cs" Link="DTOs\Paging\BaseQueryParameters.cs" />
+    <Compile Include="..\..\DiabetesAPI\Application\DTOs\Paging\PagedResult.cs" Link="DTOs\Paging\PagedResult.cs" />
+    <Compile Include="..\..\DiabetesAPI\Application\DTOs\User\UserLoginDTO.cs" Link="DTOs\User\UserLoginDTO.cs" />
+    <Compile Include="..\..\DiabetesAPI\Application\DTOs\User\UserRegisterDTO.cs" Link="DTOs\User\UserRegisterDTO.cs" />
+    <Compile Include="..\..\DiabetesAPI\Application\DTOs\User\UserResponseDTO.cs" Link="DTOs\User\UserResponseDTO.cs" />
+    <Compile Include="..\..\DiabetesAPI\Application\DTOs\User\UserUpdateDTO.cs" Link="DTOs\User\UserUpdateDTO.cs" />
+    <Compile Include="..\..\DiabetesAPI\Domain\Interfaces\ICreateUpdateDTO.cs" Link="DTOs\Base\ICreateUpdateDTO.cs" />
+    <Compile Include="..\..\DiabetesAPI\Domain\Interfaces\IEntity.cs" Link="DTOs\Base\IEntity.cs" />
+    <Compile Include="..\..\DiabetesAPI\Domain\Interfaces\IResponseDTO.cs" Link="DTOs\Base\IResponseDTO.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BlazorFluentValidation" Version="2.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="9.0.11" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="9.0.11" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="DTOs\FoodEntry\" />
+    <Folder Include="DTOs\Food\" />
+    <Folder Include="DTOs\GlucoseEntry\" />
+    <Folder Include="DTOs\InsulinEntry\" />
+    <Folder Include="DTOs\MealEntry\" />
+    <Folder Include="DTOs\Base\" />
+    <Folder Include="DTOs\Paging\" />
+    <Folder Include="DTOs\User\" />
+  </ItemGroup>
+
+</Project>

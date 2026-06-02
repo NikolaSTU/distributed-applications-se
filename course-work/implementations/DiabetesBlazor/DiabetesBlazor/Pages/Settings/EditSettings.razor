@@ -1,0 +1,225 @@
+﻿@page "/settings/edit"
+@using System.Net.Http.Headers
+@using System.Text.Json
+@using System.Text
+@inject HttpClient Http
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+<div class="form-page-container">
+    <div class="form-header">
+        <button class="btn-back" @onclick="GoBack">◀ Назад</button>
+        <h2>✏️ Редактиране на Профила</h2>
+        <p>Промени медицинските си коефициенти и настройки за изчисляване на insulin дози.</p>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="loading-status">Зареждане на данните за профила...</div>
+    }
+    else
+    {
+        @if (!string.IsNullOrEmpty(errorMessage))
+        {
+            <div class="alert alert-danger">@errorMessage</div>
+        }
+
+        <div class="form-card">
+            <div class="form-group">
+                <label>Потребителско име*</label>
+                <input type="text" class="form-control" @bind="username" />
+            </div>
+
+            <div class="form-grid-3">
+                <div class="form-group">
+                    <label>Въглехидратен коефициент (ICR)</label>
+                    <input type="number" step="0.1" class="form-control" @bind="icr" />
+                    <small class="form-text-hint">g / 1 U</small>
+                </div>
+
+                <div class="form-group">
+                    <label>Фактор на чувствителност (ISF)</label>
+                    <input type="number" step="0.1" class="form-control" @bind="isf" />
+                    <small class="form-text-hint">mmol/L / 1 U</small>
+                </div>
+
+                <div class="form-group">
+                    <label>Целева кръвна захар</label>
+                    <input type="number" step="0.1" class="form-control" @bind="targetGlucose" />
+                    <small class="form-text-hint">mmol/L</small>
+                </div>
+            </div>
+
+            <div class="form-actions">
+                <button class="btn btn-save" @onclick="UpdateProfileAsync" disabled="@isSaving">
+                    @if (isSaving)
+                    {
+                        <span>Запазване...</span>
+                    }
+                    else
+                    {
+                        <span>💾 Обнови Профила</span>
+                    }
+                </button>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private string username = string.Empty;
+    private int userId = 0;
+    private double icr;
+    private double isf;
+    private double targetGlucose;
+
+    private bool isLoading = true;
+    private bool isSaving = false;
+    private string errorMessage = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        isLoading = true;
+        errorMessage = string.Empty;
+
+        try
+        {
+            var token = await JS.InvokeAsync<string>("localStorage.getItem", "authToken");
+            if (string.IsNullOrEmpty(token))
+            {
+                errorMessage = "Няма намерен токен за автентикация. Моля, влезте в профила си.";
+                isLoading = false;
+                return;
+            }
+
+            var chunks = token.Split('.');
+            if (chunks.Length > 1)
+            {
+                var base64 = chunks[1].Replace('-', '+').Replace('_', '/');
+                switch (base64.Length % 4)
+                {
+                    case 2: base64 += "=="; break;
+                    case 3: base64 += "="; break;
+                }
+                var jsonBytes = Convert.FromBase64String(base64);
+                using var jwtDoc = JsonDocument.Parse(jsonBytes);
+                var rootJwt = jwtDoc.RootElement;
+
+                if (rootJwt.TryGetProperty("nameid", out var idProp))
+                {
+                    int.TryParse(idProp.GetString(), out userId);
+                }
+                else if (rootJwt.TryGetProperty("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier", out var longIdProp))
+                {
+                    int.TryParse(longIdProp.GetString(), out userId);
+                }
+            }
+
+            if (userId <= 0)
+            {
+                errorMessage = "Неуспешно разчитане на сесията от токена.";
+                isLoading = false;
+                return;
+            }
+
+            var request = new HttpRequestMessage(HttpMethod.Get, $"api/Users/{userId}");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+            var response = await Http.SendAsync(request);
+            if (response.IsSuccessStatusCode)
+            {
+                var jsonString = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(jsonString);
+                var root = doc.RootElement;
+
+                username = GetPropString(root, "username");
+                icr = GetPropDouble(root, "icr");
+                isf = GetPropDouble(root, "isf");
+                targetGlucose = GetPropDouble(root, "targetGlucose");
+            }
+            else
+            {
+                errorMessage = $"Проблем при извличане на данните от сървъра ({response.StatusCode}).";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Възникна грешка: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task UpdateProfileAsync()
+    {
+        if (string.IsNullOrWhiteSpace(username) || username.Length < 2)
+        {
+            errorMessage = "Потребителското име трябва да съдържа поне 2 символа.";
+            return;
+        }
+
+        if (icr <= 0 || isf <= 0 || targetGlucose <= 0)
+        {
+            errorMessage = "Всички медицински показатели трябва да бъдат по-големи от 0.";
+            return;
+        }
+
+        isSaving = true;
+        errorMessage = string.Empty;
+
+        try
+        {
+            var token = await JS.InvokeAsync<string>("localStorage.getItem", "authToken");
+
+            var updatedProfile = new
+            {
+                username = username,
+                userId = userId,
+                icr = icr,
+                isf = isf,
+                targetGlucose = targetGlucose
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Put, $"api/Users/{userId}");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            request.Content = new StringContent(JsonSerializer.Serialize(updatedProfile), Encoding.UTF8, "application/json");
+
+            var response = await Http.SendAsync(request);
+            if (response.IsSuccessStatusCode)
+            {
+                Navigation.NavigateTo("/settings");
+            }
+            else
+            {
+                errorMessage = $"Неуспешно обновяване на профила. Сървърът върна статус: {response.StatusCode}";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Възникна грешка при запазването: {ex.Message}";
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    private void GoBack() => Navigation.NavigateTo("/settings");
+
+    private string GetPropString(JsonElement el, string name) =>
+        el.TryGetProperty(name, out var p) ? p.GetString() ?? "" : "";
+
+    private double GetPropDouble(JsonElement el, string name)
+    {
+        var camel = char.ToLower(name[0]) + name.Substring(1);
+        var pascal = char.ToUpper(name[0]) + name.Substring(1);
+        if (el.TryGetProperty(camel, out var p) || el.TryGetProperty(pascal, out p))
+        {
+            if (p.ValueKind == JsonValueKind.Number) return p.GetDouble();
+            if (p.ValueKind == JsonValueKind.String && double.TryParse(p.GetString(), out var d)) return d;
+        }
+        return 0;
+    }
+}

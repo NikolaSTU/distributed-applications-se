@@ -1,0 +1,318 @@
+﻿@page "/settings"
+@using System.Net.Http.Headers
+@using System.Text.Json
+@inject HttpClient Http
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+<div class="logbook-container">
+    <div class="page-header-inline">
+        <h2>⚙️ Настройки</h2>
+        <span class="header-divider">|</span>
+        <p>Здравей, @username! Преглед на твоите медицински коефициенти.</p>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="loading-status">
+            <span>Зареждане на профила...</span>
+        </div>
+    }
+    else if (!string.IsNullOrEmpty(apiError))
+    {
+        <div class="alert">@apiError</div>
+    }
+    else
+    {
+        <div class="filter-panel-compact">
+            <div class="settings-metrics-row">
+
+                <div class="metric-col">
+                    <span class="metric-label">Въглехидратен коефициент (ICR)</span>
+                    <span class="metric-value text-insulin">@icr.ToString("F1") <small>g/U</small></span>
+                    <p class="metric-desc">Грамове въглехидрати, покривани от 1 единица инсулин.</p>
+                </div>
+
+                <div class="metric-col border-left-dashed">
+                    <span class="metric-label">Фактор на чувствителност (ISF)</span>
+                    <span class="metric-value text-insulin">@isf.ToString("F1") <small>mmol/L</small></span>
+                    <p class="metric-desc">С колко mmol/L пада захарта от 1 единица инсулин.</p>
+                </div>
+
+                <div class="metric-col border-left-dashed">
+                    <span class="metric-label">Целева кръвна захар</span>
+                    <span class="metric-value glucose-badge glucose-normal">@targetGlucose.ToString("F1") <small>mmol/L</small></span>
+                    <p class="metric-desc">Желаната стойност, към която се стреми калкулаторът.</p>
+                </div>
+
+            </div>
+        </div>
+
+        <div class="settings-actions">
+            <button class="btn-sm btn-primary" @onclick="NavigateToEdit">✏️ Редактирай профила</button>
+        </div>
+    }
+</div>
+
+<style>
+    .settings-metrics-row {
+        display: flex;
+        flex-direction: row;
+        width: 100%;
+        gap: 15px;
+        align-items: stretch;
+    }
+
+    .metric-col {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 10px;
+    }
+
+    .border-left-dashed {
+        border-left: 1px dashed #e2e8f0;
+        padding-left: 20px;
+    }
+
+    .metric-label {
+        font-size: 11px;
+        font-weight: 600;
+        color: #64748b;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+    }
+
+    .metric-value {
+        font-size: 26px;
+        font-weight: 700;
+        letter-spacing: -0.5px;
+        line-height: 1.2;
+    }
+
+        .metric-value small {
+            font-size: 13px;
+            font-weight: 500;
+            color: #64748b;
+        }
+
+    .metric-desc {
+        margin: 0;
+        font-size: 12px;
+        color: #7f8c8d;
+        line-height: 1.4;
+    }
+
+    .settings-actions {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 15px;
+    }
+
+    @@media (max-width: 768px) {
+        .settings-metrics-row {
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .border-left-dashed {
+            border-left: none;
+            border-top: 1px dashed #e2e8f0;
+            padding-left: 10px;
+            padding-top: 15px;
+        }
+    }
+
+    .logbook-container {
+        max-width: 1250px;
+        margin: 0 auto;
+        font-family: 'Segoe UI', system-ui, sans-serif;
+        padding: 5px;
+    }
+
+    .page-header-inline {
+        display: flex;
+        align-items: center;
+        margin-bottom: 15px;
+        padding-bottom: 5px;
+        border-bottom: 1px solid #eef2f5;
+    }
+
+        .page-header-inline h2 {
+            margin: 0;
+            font-size: 20px;
+            color: #2c3e50;
+            font-weight: 600;
+        }
+
+    .header-divider {
+        margin: 0 12px;
+        color: #b2bec3;
+        font-weight: 300;
+        font-size: 16px;
+    }
+
+    .page-header-inline p {
+        margin: 0;
+        color: #7f8c8d;
+        font-size: 13px;
+    }
+
+    .filter-panel-compact {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        padding: 16px 18px;
+        border-radius: 8px;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.01);
+        margin-bottom: 15px;
+    }
+
+    .btn-sm {
+        padding: 7px 14px;
+        border: none;
+        border-radius: 6px;
+        font-weight: 600;
+        font-size: 13px;
+        cursor: pointer;
+        transition: background 0.15s;
+        white-space: nowrap;
+    }
+
+    .btn-primary {
+        background: #3b82f6;
+        color: white;
+    }
+
+        .btn-primary:hover {
+            background: #2563eb;
+        }
+
+    .text-insulin {
+        color: #8b5cf6;
+    }
+
+    .glucose-badge {
+        display: inline-block;
+        font-size: 26px;
+        font-weight: 700;
+        border-radius: 4px;
+    }
+
+    .glucose-normal {
+        color: #065f46;
+    }
+
+    .loading-status {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 40px;
+        color: #64748b;
+    }
+
+    .alert {
+        padding: 12px;
+        background: #f8d7da;
+        color: #721c24;
+        border-radius: 6px;
+        text-align: center;
+    }
+</style>
+
+@code {
+    private bool isLoading = true;
+    private string apiError = string.Empty;
+
+    private string username = "-";
+    private int userId = 0;
+    private double icr = 0.0;
+    private double isf = 0.0;
+    private double targetGlucose = 0.0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadUserProfileAsync();
+    }
+
+    private async Task LoadUserProfileAsync()
+    {
+        isLoading = true;
+        apiError = string.Empty;
+
+        try
+        {
+            var token = await JS.InvokeAsync<string>("localStorage.getItem", "authToken");
+            if (string.IsNullOrEmpty(token))
+            {
+                apiError = "Няма намерен токен за автентикация. Моля, влезте в профила си отново.";
+                isLoading = false;
+                return;
+            }
+
+            var chunks = token.Split('.');
+            if (chunks.Length > 1)
+            {
+                var base64 = chunks[1].Replace('-', '+').Replace('_', '/');
+                switch (base64.Length % 4)
+                {
+                    case 2: base64 += "=="; break;
+                    case 3: base64 += "="; break;
+                }
+                var jsonBytes = Convert.FromBase64String(base64);
+                using var jwtDoc = JsonDocument.Parse(jsonBytes);
+                var rootJwt = jwtDoc.RootElement;
+
+                if (rootJwt.TryGetProperty("nameid", out var idProp))
+                {
+                    int.TryParse(idProp.GetString(), out userId);
+                }
+                else if (rootJwt.TryGetProperty("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier", out var longIdProp))
+                {
+                    int.TryParse(longIdProp.GetString(), out userId);
+                }
+            }
+
+            if (userId <= 0)
+            {
+                apiError = "Неуспешно разчитане на сесията ви от токена.";
+                isLoading = false;
+                return;
+            }
+
+            var request = new HttpRequestMessage(HttpMethod.Get, $"api/Users/{userId}");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+            var response = await Http.SendAsync(request);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var jsonStr = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(jsonStr);
+                var root = doc.RootElement;
+
+                username = root.TryGetProperty("username", out var uProp) ? uProp.GetString() ?? "-" : "-";
+                icr = root.TryGetProperty("icr", out var icrProp) ? icrProp.GetDouble() : 0.0;
+                isf = root.TryGetProperty("isf", out var isfProp) ? isfProp.GetDouble() : 0.0;
+                targetGlucose = root.TryGetProperty("targetGlucose", out var tgProp) ? tgProp.GetDouble() : 0.0;
+            }
+            else
+            {
+                apiError = $"Грешка при комуникация със сървъра ({response.StatusCode}).";
+            }
+        }
+        catch (Exception ex)
+        {
+            apiError = $"Възникна грешка в приложението: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void NavigateToEdit()
+    {
+        Navigation.NavigateTo("/settings/edit");
+    }
+}
